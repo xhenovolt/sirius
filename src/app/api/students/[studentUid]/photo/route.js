@@ -1,0 +1,23 @@
+import { NextResponse } from "next/server";
+import { getSession } from "@/lib/auth";
+import { getDb } from "@/lib/db";
+import { uploadStudentPhoto } from "@/lib/cloudinary";
+
+export const runtime = "nodejs";
+
+export async function POST(request, { params }) {
+  if (!(await getSession())) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+  const { studentUid } = await params;
+  const formData = await request.formData();
+  const file = formData.get("photo");
+  if (!file || typeof file.arrayBuffer !== "function" || !file.type.startsWith("image/") || file.size > 5 * 1024 * 1024) return NextResponse.json({ error: "Please choose an image smaller than 5 MB." }, { status: 400 });
+  try {
+    const upload = await uploadStudentPhoto(Buffer.from(await file.arrayBuffer()), studentUid);
+    const [result] = await getDb().query("UPDATE students SET photo_url = ?, updated_at = CURRENT_TIMESTAMP WHERE student_uid = ?", [upload.secure_url, studentUid]);
+    if (!result.affectedRows) return NextResponse.json({ error: "Student not found." }, { status: 404 });
+    return NextResponse.json({ photoUrl: upload.secure_url });
+  } catch (error) {
+    console.error("Student photo upload failed", error);
+    return NextResponse.json({ error: "Unable to upload student photo. Please try again." }, { status: 500 });
+  }
+}

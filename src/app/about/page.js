@@ -1,0 +1,7 @@
+import Link from "next/link";
+
+export const metadata = { title: "About Sirius | Xhenvolt" };
+
+export default function AboutPage() {
+  return <main className="info-page"><div className="info-nav"><Link className="brand" href="/"><span className="brand-mark">S</span><span>Sirius</span></Link><Link className="text-link" href="/login">Sign in →</Link></div><section className="info-hero"><p className="eyebrow">By Xhenvolt</p><h1>Simple student identity, built for schools.</h1><p>Sirius helps school teams import learner records, create stable QR identities, print cards, and identify learners quickly when a card is scanned.</p></section><section className="info-section"><p className="eyebrow">What Sirius does</p><div className="info-columns"><div><h2>One reliable identity</h2><p>Every learner receives a permanent Sirius ID. The QR code points to that ID, so records can change without replacing the identity.</p></div><div><h2>Designed for the day-to-day</h2><p>Import spreadsheets in bulk, keep photos in Cloudinary, print straightforward cards, and find a learner from a camera or USB scanner.</p></div></div></section><footer className="info-footer">Sirius by Xhenvolt · <Link href="/documentation">Documentation</Link></footer></main>;
+}
