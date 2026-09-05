@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import ExcelJS from "exceljs";
 import { commitImport, normalizeRows } from "@/lib/imports";
 import { getSession } from "@/lib/auth";
+import { recordAuditLog } from "@/lib/audit";
 
 export const runtime = "nodejs";
 
@@ -42,7 +43,9 @@ export async function POST(request) {
     if (!body.fileName || !Array.isArray(body.rows) || body.rows.length > 10000) {
       return NextResponse.json({ error: "Invalid import preview." }, { status: 400 });
     }
-    return NextResponse.json(await commitImport(body.fileName, normalizeRows(body.rows)));
+    const result = await commitImport(body.fileName, normalizeRows(body.rows));
+    await recordAuditLog({ session: await getSession(), request, action: "import.committed", entityType: "import_batch", entityId: body.fileName, details: result });
+    return NextResponse.json(result);
   } catch (error) {
     console.error("Student import failed", error);
     return NextResponse.json({ error: "Unable to import spreadsheet. Please check the file format." }, { status: 500 });

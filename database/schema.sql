@@ -111,3 +111,22 @@ CREATE TABLE IF NOT EXISTS students (
   CONSTRAINT students_school_fk FOREIGN KEY (school_id) REFERENCES schools (school_id),
   CONSTRAINT students_import_batch_fk FOREIGN KEY (import_batch_id) REFERENCES import_batches (id)
 );
+
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  school_id VARCHAR(64) NULL,
+  user_id BIGINT UNSIGNED NULL,
+  actor_email VARCHAR(200) NULL,
+  action VARCHAR(100) NOT NULL,
+  entity_type VARCHAR(100) NULL,
+  entity_id VARCHAR(200) NULL,
+  details JSON NULL,
+  ip_address VARCHAR(64) NULL,
+  user_agent VARCHAR(255) NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY audit_logs_user_index (user_id),
+  KEY audit_logs_action_index (action),
+  KEY audit_logs_created_index (created_at),
+  CONSTRAINT audit_logs_user_fk FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL
+);

@@ -2,11 +2,13 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { uploadStudentPhoto } from "@/lib/cloudinary";
+import { recordAuditLog } from "@/lib/audit";
 
 export const runtime = "nodejs";
 
 export async function POST(request, { params }) {
-  if (!(await getSession())) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
   const { studentUid } = await params;
   const formData = await request.formData();
   const file = formData.get("photo");
@@ -15,6 +17,7 @@ export async function POST(request, { params }) {
     const upload = await uploadStudentPhoto(Buffer.from(await file.arrayBuffer()), studentUid);
     const [result] = await getDb().query("UPDATE students SET photo_url = ?, updated_at = CURRENT_TIMESTAMP WHERE student_uid = ?", [upload.secure_url, studentUid]);
     if (!result.affectedRows) return NextResponse.json({ error: "Student not found." }, { status: 404 });
+    await recordAuditLog({ session, request, action: "student.photo_updated", entityType: "student", entityId: studentUid });
     return NextResponse.json({ photoUrl: upload.secure_url });
   } catch (error) {
     console.error("Student photo upload failed", error);

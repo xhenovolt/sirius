@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createUser, requireAdmin, terminateUserSessions } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { getSchoolSettings, getUsers } from "@/lib/students";
+import { recordAuditLog } from "@/lib/audit";
 
 export async function GET() {
   if (!(await requireAdmin())) return NextResponse.json({ error: "Administrator access required." }, { status: 403 });
@@ -9,11 +10,13 @@ export async function GET() {
 }
 
 export async function PUT(request) {
-  if (!(await requireAdmin())) return NextResponse.json({ error: "Administrator access required." }, { status: 403 });
+  const admin = await requireAdmin();
+  if (!admin) return NextResponse.json({ error: "Administrator access required." }, { status: 403 });
   try {
     const body = await request.json();
     if (!body.schoolName?.trim() || body.schoolName.length > 200) return NextResponse.json({ error: "School name is required." }, { status: 400 });
     await getDb().query("UPDATE schools SET school_name = ?, school_code = ?, address = ?, contact_phone = ?, contact_email = ?, updated_at = CURRENT_TIMESTAMP WHERE school_id = 'default'", [body.schoolName.trim(), body.schoolCode?.trim() || null, body.address?.trim() || null, body.contactPhone?.trim() || null, body.contactEmail?.trim() || null]);
+    await recordAuditLog({ session: admin, request, action: "school.settings_updated", entityType: "school", entityId: "default", details: { schoolName: body.schoolName.trim() } });
     return NextResponse.json({ school: await getSchoolSettings() });
   } catch (error) { console.error("Settings update failed", error); return NextResponse.json({ error: "Unable to save school settings." }, { status: 500 }); }
 }
@@ -31,16 +34,20 @@ export async function PATCH(request) {
       await getDb().query("UPDATE users SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", [body.action === "disable" ? "disabled" : "active", userId]);
       if (body.action === "disable") await terminateUserSessions(userId);
     } else return NextResponse.json({ error: "Unknown user action." }, { status: 400 });
+    await recordAuditLog({ session: admin, request, action: `user.${body.action}`, entityType: "user", entityId: String(userId) });
     return NextResponse.json({ ok: true });
   } catch (error) { console.error("User action failed", error); return NextResponse.json({ error: "Unable to update user access." }, { status: 500 }); }
 }
 
 export async function POST(request) {
-  if (!(await requireAdmin())) return NextResponse.json({ error: "Administrator access required." }, { status: 403 });
+  const admin = await requireAdmin();
+  if (!admin) return NextResponse.json({ error: "Administrator access required." }, { status: 403 });
   try {
     const body = await request.json();
     if (!body.displayName?.trim() || !body.email?.trim() || !body.password || body.password.length < 12) return NextResponse.json({ error: "Name, email, and a password of at least 12 characters are required." }, { status: 400 });
-    await createUser(body.email.trim(), body.password, body.displayName.trim(), body.phone?.trim() || "", body.role === "admin" ? "admin" : "operator");
+    const role = body.role === "admin" ? "admin" : "operator";
+    await createUser(body.email.trim(), body.password, body.displayName.trim(), body.phone?.trim() || "", role);
+    await recordAuditLog({ session: admin, request, action: "user.created", entityType: "user", entityId: body.email.trim(), details: { role } });
     return NextResponse.json({ created: true }, { status: 201 });
   } catch (error) {
     console.error("Admin user creation failed", error);

@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 import { signUp } from "@/lib/auth";
+import { recordAuditLog } from "@/lib/audit";
 
 export async function POST(request) {
   try {
     const { email, password, displayName, phone } = await request.json();
     if (!displayName || !email || !phone || !password || password.length < 12) return NextResponse.json({ error: "Name, email, phone, and a password of at least 12 characters are required." }, { status: 400 });
     await signUp(email, password, displayName, phone);
+    await recordAuditLog({ request, action: "signup", entityType: "user", entityId: email, details: { email, displayName } });
     return NextResponse.json({ created: true }, { status: 201 });
   } catch (error) {
     console.error("Signup failed", error);

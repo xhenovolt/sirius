@@ -1,0 +1,5 @@
+admission_number,first_name,last_name,gender,class_name,stream,photo_url,parent_name,parent_phone
+JIPRA-2026-001,Amina,Njoroge,Female,Form 2,East,,Mary Njoroge,+254700000001
+JIPRA-2026-002,Brian,Otieno,Male,Form 2,West,,Peter Otieno,+254700000002
+JIPRA-2026-003,Chloe,Wambui,Female,Form 1,North,https://example.com/photos/chloe-wambui.jpg,Grace Wambui,+254700000003
+JIPRA-2026-004,Daniel,Kiptoo,Male,Form 3,South,,Joseph Kiptoo,+254700000004
