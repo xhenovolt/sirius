@@ -251,3 +251,41 @@ remediation commits were made as part of this audit.
 - Step 3 was not started: Step 2 still lacks the required disposable
   real-database tenant-isolation verification. Advancing would violate the
   stated "close tenancy gaps before any new feature" gate.
+
+## 2026-11-07 — Step 3 school users and presence
+
+### Done
+
+- School admin checks now recognize either the school `superadmin` or `admin`
+  role membership; a normal school admin can manage users without relying on
+  the deprecated `users.role` authorization column.
+- School user role changes now modify `user_roles` in a transaction and keep
+  the display column synchronized, fixing the previous promote/demote no-op.
+- Added server-side user profile edit, password reset, enable/disable, soft
+  delete, role change, and session-logout actions. Changes are school-scoped;
+  access-removing changes end active school sessions.
+- A school-row lock serializes changes that could remove administrator
+  access. Self-demotion, self-disable, self-delete, and removal/demotion/
+  disablement of the last active administrator are rejected server-side.
+- User list separates enabled/disabled/deleted state from online/offline
+  presence. Presence uses active sessions seen within the existing five-minute
+  window. Control Center's schools view shows enabled and online user counts
+  separately for every school visible to the control operator.
+- Added tests for self-delete and last-admin demotion guards.
+
+### Verification
+
+- `npm.cmd test`: passed, 24 tests / 24 passing.
+- `npm.cmd run build`: passed.
+- Server-side lifecycle responses are audited with the existing school audit
+  logger.
+
+### Next / known issues
+
+- Step 2's real TiDB leak suite and migration verification are still not
+  available because no dedicated disposable test database is configured.
+  The caller explicitly requested continuing despite that gate; this
+  implementation does not claim the database isolation requirement is proven.
+- Remaining roadmap work: Step 4 student core, Step 5 import diff pipeline,
+  Step 6 identity/verification/clearance, Step 7 card designer, Step 8
+  hardening.

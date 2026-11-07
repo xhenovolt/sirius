@@ -31,6 +31,17 @@ const sessionSelect = `
          u.school_id AS schoolId,
          u.must_change_password AS mustChangePassword,
          s.id AS sessionId,
+         COALESCE((
+           SELECT r.slug
+           FROM user_roles ur
+           JOIN roles r ON r.id = ur.role_id
+           WHERE ur.user_id = u.id
+             AND ur.school_id = u.school_id
+             AND ur.is_active = 1
+             AND r.is_active = 1
+           ORDER BY CASE r.slug WHEN 'superadmin' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END
+           LIMIT 1
+         ), u.role) AS roleSlug,
          EXISTS (
            SELECT 1
            FROM user_roles ur
@@ -40,7 +51,17 @@ const sessionSelect = `
              AND ur.is_active = 1
              AND r.is_active = 1
              AND r.is_super_admin = 1
-         ) AS isSuperAdmin
+         ) AS isSuperAdmin,
+         EXISTS (
+           SELECT 1
+           FROM user_roles ur
+           JOIN roles r ON r.id = ur.role_id
+           WHERE ur.user_id = u.id
+             AND ur.school_id = u.school_id
+             AND ur.is_active = 1
+             AND r.is_active = 1
+             AND r.slug IN ('superadmin', 'admin')
+         ) AS isSchoolAdmin
   FROM sessions s
   JOIN users u ON u.id = s.user_id
   WHERE s.token_hash = ?
@@ -59,7 +80,9 @@ function shapeSession(row) {
     phone: row.phone,
     school_id: row.schoolId,
     mustChangePassword: Boolean(row.mustChangePassword),
+    role: row.roleSlug,
     isSuperAdmin: Boolean(row.isSuperAdmin),
+    isSchoolAdmin: Boolean(row.isSchoolAdmin),
   };
 }
 
@@ -205,7 +228,7 @@ export async function requireSession() {
  */
 export async function requireSchoolAdmin() {
   const session = await getSession();
-  return session && session.isSuperAdmin ? session : null;
+  return session && session.isSchoolAdmin ? session : null;
 }
 
 export async function destroySession() {

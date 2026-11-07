@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { createUser, requireSchoolAdmin, terminateUserSessions } from "@/lib/auth";
-import { getDb } from "@/lib/db";
+import { createUser, requireSchoolAdmin } from "@/lib/auth";
 import { queryTenant } from "@/lib/dbTenant";
 import { getSchoolSettings, getUsers } from "@/lib/students";
 import { recordAuditLog } from "@/lib/audit";
+import { ASSIGNABLE_ROLES, performSchoolUserAction } from "@/lib/schoolUsers";
 
 export async function GET() {
   const admin = await requireSchoolAdmin();
@@ -29,18 +29,22 @@ export async function PATCH(request) {
   try {
     const body = await request.json();
     const userId = Number(body.userId);
-    if (!Number.isInteger(userId) || userId < 1 || userId === Number(admin.id)) return NextResponse.json({ error: "That user cannot be changed here." }, { status: 400 });
-    // A school admin may only act on their own school's users.
-    const [target] = await getDb().query("SELECT id FROM users WHERE id = ? AND school_id = ? LIMIT 1", [userId, admin.school_id]);
-    if (!target[0]) return NextResponse.json({ error: "That user is not part of your school." }, { status: 404 });
-
-    if (body.action === "logout") await terminateUserSessions(userId);
-    else if (body.action === "promote" || body.action === "demote") await getDb().query("UPDATE users SET role = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND school_id = ?", [body.action === "promote" ? "admin" : "operator", userId, admin.school_id]);
-    else if (body.action === "disable" || body.action === "enable") {
-      await getDb().query("UPDATE users SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND school_id = ?", [body.action === "disable" ? "disabled" : "active", userId, admin.school_id]);
-      if (body.action === "disable") await terminateUserSessions(userId);
-    } else return NextResponse.json({ error: "Unknown user action." }, { status: 400 });
-    await recordAuditLog({ session: admin, request, action: `user.${body.action}`, entityType: "user", entityId: String(userId) });
+    const result = await performSchoolUserAction({
+      schoolId: admin.school_id,
+      actorId: admin.id,
+      userId,
+      action: body.action,
+      values: body,
+    });
+    if (!result.ok) return NextResponse.json({ error: result.reason }, { status: result.status });
+    await recordAuditLog({
+      session: admin,
+      request,
+      action: `user.${body.action}`,
+      entityType: "user",
+      entityId: String(userId),
+      details: body.action === "edit" ? { fields: ["displayName", "phone"] } : null,
+    });
     return NextResponse.json({ ok: true });
   } catch (error) { console.error("User action failed", error); return NextResponse.json({ error: "Unable to update user access." }, { status: 500 }); }
 }
@@ -50,8 +54,12 @@ export async function POST(request) {
   if (!admin) return NextResponse.json({ error: "Administrator access required." }, { status: 403 });
   try {
     const body = await request.json();
-    if (!body.displayName?.trim() || !body.email?.trim() || !body.password || body.password.length < 12) return NextResponse.json({ error: "Name, email, and a password of at least 12 characters are required." }, { status: 400 });
-    const role = body.role === "admin" ? "admin" : "operator";
+    if (typeof body.displayName !== "string" || !body.displayName.trim() || body.displayName.trim().length > 150
+      || typeof body.email !== "string" || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(body.email.trim())
+      || typeof body.password !== "string" || body.password.length < 12) {
+      return NextResponse.json({ error: "A valid name and email, and a password of at least 12 characters are required." }, { status: 400 });
+    }
+    const role = ASSIGNABLE_ROLES.has(body.role) ? body.role : "operator";
     await createUser({ schoolId: admin.school_id, email: body.email.trim(), password: body.password, displayName: body.displayName.trim(), phone: body.phone?.trim() || "", roleSlug: role, createdBy: admin.id });
     await recordAuditLog({ session: admin, request, action: "user.created", entityType: "user", entityId: body.email.trim(), details: { role } });
     return NextResponse.json({ created: true }, { status: 201 });

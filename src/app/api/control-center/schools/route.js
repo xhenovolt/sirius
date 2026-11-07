@@ -62,6 +62,12 @@ export async function GET(request) {
               s.subscription_end_date, s.created_at,
               (SELECT COUNT(*) FROM students st WHERE st.school_id = s.school_id AND st.status = 'active') learners,
               (SELECT COUNT(*) FROM users u WHERE u.school_id = s.school_id AND u.deleted_at IS NULL AND u.status = 'active') users,
+              (SELECT COUNT(DISTINCT u.id)
+                 FROM users u
+                 JOIN sessions us ON us.user_id = u.id AND us.school_id = u.school_id
+                WHERE u.school_id = s.school_id AND u.deleted_at IS NULL AND u.status = 'active'
+                  AND us.is_active = 1 AND us.expires_at > CURRENT_TIMESTAMP
+                  AND us.last_seen_at >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 5 MINUTE)) online_users,
               (SELECT COUNT(*) FROM qr_identities qi WHERE qi.school_id = s.school_id AND qi.revoked_at IS NULL) cards
          FROM schools s ${whereSql}
         ORDER BY s.created_at DESC LIMIT ? OFFSET ?`,
@@ -88,6 +94,7 @@ export async function GET(request) {
       created_at: r.created_at,
       learners: Number(r.learners || 0),
       users: Number(r.users || 0),
+      online_users: Number(r.online_users || 0),
       cards: Number(r.cards || 0),
       capacity: capacitySeverity(limits, { learners: Number(r.learners || 0), cards: Number(r.cards || 0) }),
     };

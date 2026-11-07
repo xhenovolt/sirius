@@ -1,0 +1,185 @@
+import bcrypt from "bcryptjs";
+import { queryTenant, withTenantTransaction } from "./dbTenant.js";
+
+const ASSIGNABLE_ROLES = new Set(["admin", "operator"]);
+
+export function schoolUserActionPolicy({ action, actorId, targetId, targetIsAdmin, activeAdminCount }) {
+  const isSelf = Number(actorId) === Number(targetId);
+  const removesAdmin = targetIsAdmin && ["demote", "disable", "delete"].includes(action);
+
+  if (isSelf && ["demote", "disable", "delete"].includes(action)) {
+    return { ok: false, status: 400, reason: "You cannot remove or disable your own access." };
+  }
+  if (removesAdmin && activeAdminCount <= 1) {
+    return { ok: false, status: 409, reason: "The last active school administrator cannot be demoted, disabled, or deleted." };
+  }
+  return { ok: true };
+}
+
+async function endUserSessions(scoped, userId, schoolId) {
+  await scoped.query(
+    "UPDATE sessions SET is_active = 0 WHERE user_id = ? AND school_id = ? AND is_active = 1",
+    [userId, schoolId],
+  );
+}
+
+export async function performSchoolUserAction({ schoolId, actorId, userId, action, values = {} }) {
+  const targetId = Number(userId);
+  if (!Number.isInteger(targetId) || targetId < 1) {
+    return { ok: false, status: 400, reason: "A valid user is required." };
+  }
+
+  if (action === "edit") {
+    const displayName = String(values.displayName || "").trim();
+    const phone = String(values.phone || "").trim();
+    if (!displayName || displayName.length > 150 || phone.length > 32) {
+      return { ok: false, status: 400, reason: "A name (up to 150 characters) and phone (up to 32 characters) are required." };
+    }
+  } else if (action === "reset_password" && String(values.password || "").length < 12) {
+    return { ok: false, status: 400, reason: "Password must be at least 12 characters." };
+  } else if (action === "promote" || action === "demote") {
+    // Both actions have fixed role assignments.
+  } else if (!["disable", "enable", "delete", "logout"].includes(action)) {
+    return { ok: false, status: 400, reason: "Unknown user action." };
+  }
+
+  const passwordHash = action === "reset_password"
+    ? await bcrypt.hash(String(values.password), 12)
+    : null;
+
+  return withTenantTransaction(schoolId, async (scoped) => {
+    const [schoolRows] = await scoped.query(
+      "SELECT school_id FROM schools WHERE school_id = ? FOR UPDATE",
+      [schoolId],
+    );
+    if (!schoolRows.length) return { ok: false, status: 404, reason: "School not found." };
+
+    const [targetRows] = await scoped.query(
+      `SELECT u.id, u.status, u.deleted_at,
+              EXISTS (
+                SELECT 1
+                  FROM user_roles ur
+                  JOIN roles r ON r.id = ur.role_id AND r.school_id = ur.school_id AND r.is_active = 1
+                 WHERE ur.user_id = u.id AND ur.school_id = u.school_id
+                   AND ur.is_active = 1 AND r.slug IN ('superadmin', 'admin')
+              ) AS is_admin
+         FROM users u
+        WHERE u.id = ? AND u.school_id = ?
+        FOR UPDATE`,
+      [targetId, schoolId],
+    );
+    const target = targetRows[0];
+    if (!target || target.deleted_at) {
+      return { ok: false, status: 404, reason: "User not found." };
+    }
+
+    const [adminRows] = await scoped.query(
+      `SELECT COUNT(DISTINCT u.id) AS count
+         FROM users u
+         JOIN user_roles ur ON ur.user_id = u.id AND ur.school_id = u.school_id AND ur.is_active = 1
+         JOIN roles r ON r.id = ur.role_id AND r.school_id = ur.school_id AND r.is_active = 1
+        WHERE u.school_id = ? AND u.deleted_at IS NULL AND u.status = 'active'
+          AND r.slug IN ('superadmin', 'admin')`,
+      [schoolId],
+    );
+    const policy = schoolUserActionPolicy({
+      action,
+      actorId,
+      targetId,
+      targetIsAdmin: Boolean(target.is_admin) && target.status === "active",
+      activeAdminCount: Number(adminRows[0]?.count || 0),
+    });
+    if (!policy.ok) return policy;
+
+    if (action === "promote" || action === "demote") {
+      const roleSlug = action === "promote" ? "admin" : "operator";
+      const [roleRows] = await scoped.query(
+        "SELECT id FROM roles WHERE school_id = ? AND slug = ? AND is_active = 1 LIMIT 1",
+        [schoolId, roleSlug],
+      );
+      if (!roleRows[0]) {
+        return { ok: false, status: 409, reason: "That role is not configured for this school." };
+      }
+      await scoped.query(
+        "UPDATE user_roles SET is_active = 0 WHERE user_id = ? AND school_id = ?",
+        [targetId, schoolId],
+      );
+      await scoped.query(
+        `INSERT INTO user_roles (user_id, role_id, school_id, is_active, assigned_at, assigned_by)
+         VALUES (?, ?, ?, 1, CURRENT_TIMESTAMP, ?)
+         ON DUPLICATE KEY UPDATE is_active = 1, assigned_at = CURRENT_TIMESTAMP, assigned_by = VALUES(assigned_by)`,
+        [targetId, roleRows[0].id, schoolId, actorId],
+      );
+      await scoped.query(
+        "UPDATE users SET role = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND school_id = ?",
+        [roleSlug, targetId, schoolId],
+      );
+    } else if (action === "edit") {
+      await scoped.query(
+        "UPDATE users SET display_name = ?, phone = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND school_id = ?",
+        [String(values.displayName).trim(), String(values.phone || "").trim(), targetId, schoolId],
+      );
+    } else if (action === "reset_password") {
+      await scoped.query(
+        "UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND school_id = ?",
+        [passwordHash, targetId, schoolId],
+      );
+      await endUserSessions(scoped, targetId, schoolId);
+    } else if (action === "disable") {
+      await scoped.query(
+        "UPDATE users SET status = 'disabled', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND school_id = ?",
+        [targetId, schoolId],
+      );
+      await endUserSessions(scoped, targetId, schoolId);
+    } else if (action === "enable") {
+      await scoped.query(
+        "UPDATE users SET status = 'active', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND school_id = ?",
+        [targetId, schoolId],
+      );
+    } else if (action === "delete") {
+      await scoped.query(
+        "UPDATE users SET deleted_at = CURRENT_TIMESTAMP, status = 'disabled', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND school_id = ?",
+        [targetId, schoolId],
+      );
+      await endUserSessions(scoped, targetId, schoolId);
+    } else if (action === "logout") {
+      await endUserSessions(scoped, targetId, schoolId);
+    }
+
+    return { ok: true };
+  });
+}
+
+export async function listSchoolUsers(schoolId) {
+  const [rows] = await queryTenant(
+    schoolId,
+    `SELECT u.id, u.email, u.phone, u.display_name, u.role, u.status, u.deleted_at,
+            u.last_login_at, u.created_at,
+            COALESCE(
+              (SELECT r.slug
+                 FROM user_roles ur
+                 JOIN roles r ON r.id = ur.role_id AND r.school_id = ur.school_id
+                WHERE ur.user_id = u.id AND ur.school_id = u.school_id
+                  AND ur.is_active = 1 AND r.is_active = 1
+                ORDER BY CASE r.slug WHEN 'superadmin' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END
+                LIMIT 1),
+              u.role
+            ) AS role_slug,
+            MAX(s.last_seen_at) AS last_seen_at,
+            SUM(CASE WHEN s.is_active = 1 AND s.expires_at > CURRENT_TIMESTAMP
+                      AND s.last_seen_at >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 5 MINUTE)
+                     THEN 1 ELSE 0 END) AS online_sessions,
+            MAX(CASE WHEN s.is_active = 1 AND s.expires_at > CURRENT_TIMESTAMP
+                      AND s.last_seen_at >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 5 MINUTE)
+                     THEN 1 ELSE 0 END) AS is_online
+       FROM users u
+       LEFT JOIN sessions s ON s.user_id = u.id AND s.school_id = u.school_id
+      WHERE u.school_id = ?
+      GROUP BY u.id, u.email, u.phone, u.display_name, u.role, u.status, u.deleted_at, u.last_login_at, u.created_at
+      ORDER BY u.created_at ASC`,
+    [schoolId],
+  );
+  return rows;
+}
+
+export { ASSIGNABLE_ROLES };

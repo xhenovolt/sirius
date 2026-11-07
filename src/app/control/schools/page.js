@@ -108,7 +108,7 @@ export default function SchoolsPage() {
                 <th className="text-left px-3 py-2 font-medium">Plan</th>
                 <th className="text-right px-3 py-2 font-medium">Learners</th>
                 <th className="text-right px-3 py-2 font-medium">Cards</th>
-                <th className="text-right px-3 py-2 font-medium">Users</th>
+                <th className="text-right px-3 py-2 font-medium">Users (enabled · online)</th>
                 <th className="text-left px-3 py-2 font-medium">Capacity</th>
                 <th className="text-right px-3 py-2 font-medium">Actions</th>
               </tr>
@@ -135,7 +135,7 @@ export default function SchoolsPage() {
                   </td>
                   <td className="px-3 py-2 text-right">{s.learners}</td>
                   <td className="px-3 py-2 text-right">{s.cards}</td>
-                  <td className="px-3 py-2 text-right">{s.users}</td>
+                  <td className="px-3 py-2 text-right">{s.users} · {s.online_users}</td>
                   <td className="px-3 py-2">
                     <span className={`text-[11px] px-2 py-0.5 rounded capitalize ${SEV[s.capacity] || SEV.ok}`}>{s.capacity}</span>
                   </td>

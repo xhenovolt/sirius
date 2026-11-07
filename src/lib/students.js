@@ -1,5 +1,6 @@
 import { getDb } from "./db.js";
 import { queryTenant, queryTenantOne } from "./dbTenant.js";
+import { listSchoolUsers } from "./schoolUsers.js";
 
 export async function searchStudents(schoolId, search = "") {
   const value = String(search).trim();
@@ -79,20 +80,7 @@ export async function getSchoolSettings(schoolId) {
 }
 
 export async function getUsers(schoolId) {
-  const [rows] = await queryTenant(
-    schoolId,
-    `SELECT u.id, u.email, u.phone, u.display_name, u.role, u.status, u.last_login_at, u.created_at,
-            MAX(s.last_seen_at) AS last_seen_at,
-            SUM(s.expires_at > CURRENT_TIMESTAMP
-                AND s.last_seen_at >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 5 MINUTE)) AS active_sessions
-       FROM users u
-       LEFT JOIN sessions s ON s.user_id = u.id AND s.school_id = u.school_id
-      WHERE u.school_id = ?
-      GROUP BY u.id, u.email, u.phone, u.display_name, u.role, u.status, u.last_login_at, u.created_at
-      ORDER BY u.created_at ASC`,
-    [schoolId],
-  );
-  return rows;
+  return listSchoolUsers(schoolId);
 }
 
 export async function getPublicStudentByUid(studentUid) {
