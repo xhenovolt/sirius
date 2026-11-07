@@ -1,24 +1,31 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
 
 export default function Scanner() {
   const [code, setCode] = useState("");
-  const [student, setStudent] = useState(null);
   const [error, setError] = useState("");
   const [cameraState, setCameraState] = useState("idle");
   const scannerRef = useRef(null);
 
   async function lookup(value) {
-    let cleaned = value.trim();
-    try { if (/^https?:\/\//i.test(cleaned)) cleaned = decodeURIComponent(new URL(cleaned).pathname.split("/").filter(Boolean).pop() || ""); } catch { setError("Invalid Sirius code."); return; }
-    cleaned = cleaned.toUpperCase();
-    if (!cleaned) return;
-    setError(""); setStudent(null); setCode(cleaned);
-    const response = await fetch(`/api/students/${encodeURIComponent(cleaned)}`);
-    const result = await response.json();
-    if (!response.ok) setError(result.error || "Invalid Sirius code."); else setStudent(result.student);
+    let token = value.trim();
+    if (/^https?:\/\//i.test(token)) {
+      try {
+        const scannedUrl = new URL(token);
+        const match = /^\/v\/([A-Za-z0-9_-]{22,86})\/?$/.exec(scannedUrl.pathname);
+        if (!match) throw new Error("Unrecognized verification URL.");
+        token = match[1];
+      } catch {
+        setError("Invalid Sirius verification code.");
+        return;
+      }
+    }
+    if (!/^[A-Za-z0-9_-]{22,86}$/.test(token)) {
+      setError("Invalid Sirius verification code.");
+      return;
+    }
+    window.location.assign(`/v/${encodeURIComponent(token)}`);
   }
 
   async function startCamera() {
@@ -33,5 +40,5 @@ export default function Scanner() {
 
   useEffect(() => () => { scannerRef.current?.stop().catch(() => {}); }, []);
 
-  return <div className="scanner-layout"><div className="scanner-panel"><div className="scanner-window"><div id="sirius-reader" /><div className="scanner-corners" /></div><button className="button button-primary scanner-button" type="button" onClick={startCamera} disabled={cameraState === "starting" || cameraState === "active"}>{cameraState === "active" ? "Camera scanning" : cameraState === "starting" ? "Starting camera..." : "Use camera"}</button><p className="scanner-hint">You can also scan with a USB scanner below.</p><form className="scanner-input" onSubmit={(event) => { event.preventDefault(); lookup(code); }}><input autoFocus value={code} onChange={(event) => setCode(event.target.value)} placeholder="SIRIUS-..." aria-label="Sirius code" /><button type="submit">Find</button></form></div>{error && <div className="scan-message error-message"><strong>{error}</strong><button type="button" onClick={() => { setError(""); setStudent(null); setCode(""); }}>Try again</button></div>}{student && <section className="scan-result"><div className="profile-photo">{student.photo_url ? <img src={student.photo_url} alt={`Portrait of ${student.full_name}`} /> : student.full_name.slice(0, 1)}</div><div><p className="eyebrow">Student found</p><h2>{student.full_name}</h2><p className="profile-id">{student.student_uid}</p><div className="scan-details"><span><small>Student account no.</small><strong>{student.student_account_no}</strong></span><span><small>Class</small><strong>{student.class_name || "Not provided"}</strong></span><span><small>School</small><strong>{student.registered_school_name || student.school_name || "Not provided"}</strong></span></div><Link className="text-link" href={`/students/${encodeURIComponent(student.student_uid)}`}>Open full profile →</Link></div></section>}</div>;
+  return <div className="scanner-layout"><div className="scanner-panel"><div className="scanner-window"><div id="sirius-reader" /><div className="scanner-corners" /></div><button className="button button-primary scanner-button" type="button" onClick={startCamera} disabled={cameraState === "starting" || cameraState === "active"}>{cameraState === "active" ? "Camera scanning" : cameraState === "starting" ? "Starting camera..." : "Use camera"}</button><p className="scanner-hint">Scan a Sirius QR code or enter its opaque token below. Verification opens the live record.</p><form className="scanner-input" onSubmit={(event) => { event.preventDefault(); lookup(code); }}><input autoFocus value={code} onChange={(event) => setCode(event.target.value)} placeholder="Paste token or verification URL" aria-label="Sirius verification token" /><button type="submit">Verify</button></form></div>{error && <div className="scan-message error-message"><strong>{error}</strong><button type="button" onClick={() => { setError(""); setCode(""); }}>Try again</button></div>}</div>;
 }

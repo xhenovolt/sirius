@@ -17,8 +17,11 @@ export async function PUT(request) {
   try {
     const body = await request.json();
     if (!body.schoolName?.trim() || body.schoolName.length > 200) return NextResponse.json({ error: "School name is required." }, { status: 400 });
-    await queryTenant(admin.school_id, "UPDATE schools SET school_name = ?, school_code = ?, address = ?, contact_phone = ?, contact_email = ?, updated_at = CURRENT_TIMESTAMP WHERE school_id = ?", [body.schoolName.trim(), body.schoolCode?.trim() || null, body.address?.trim() || null, body.contactPhone?.trim() || null, body.contactEmail?.trim() || null, admin.school_id]);
-    await recordAuditLog({ session: admin, request, action: "school.settings_updated", entityType: "school", entityId: admin.school_id, details: { schoolName: body.schoolName.trim() } });
+    if (body.currentTerm != null && (typeof body.currentTerm !== "string" || body.currentTerm.trim().length > 64)) {
+      return NextResponse.json({ error: "Current term must be 64 characters or fewer." }, { status: 400 });
+    }
+    await queryTenant(admin.school_id, "UPDATE schools SET school_name = ?, school_code = ?, address = ?, contact_phone = ?, contact_email = ?, current_term = ?, updated_at = CURRENT_TIMESTAMP WHERE school_id = ?", [body.schoolName.trim(), body.schoolCode?.trim() || null, body.address?.trim() || null, body.contactPhone?.trim() || null, body.contactEmail?.trim() || null, body.currentTerm?.trim() || null, admin.school_id]);
+    await recordAuditLog({ session: admin, request, action: "school.settings_updated", entityType: "school", entityId: admin.school_id, details: { schoolName: body.schoolName.trim(), currentTerm: body.currentTerm?.trim() || null } });
     return NextResponse.json({ school: await getSchoolSettings(admin.school_id) });
   } catch (error) { console.error("Settings update failed", error); return NextResponse.json({ error: "Unable to save school settings." }, { status: 500 }); }
 }

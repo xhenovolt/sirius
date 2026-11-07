@@ -9,6 +9,7 @@ export default function SettingsForm({ school, users, currentUserId }) {
     address: school.address || "",
     contactPhone: school.contact_phone || "",
     contactEmail: school.contact_email || "",
+    currentTerm: school.current_term || "",
   });
   const [message, setMessage] = useState("");
 
@@ -80,6 +81,7 @@ export default function SettingsForm({ school, users, currentUserId }) {
             address: "Address",
             contactPhone: "Contact phone",
             contactEmail: "Contact email",
+            currentTerm: "Current term",
           }).map(([name, label]) => (
             <label key={name}>
               {label}

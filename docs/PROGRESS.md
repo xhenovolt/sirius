@@ -456,3 +456,45 @@ remediation commits were made as part of this audit.
 - Continue remaining Step 5 coverage and verify migrations/import transactions
   against a dedicated test database before claiming live database validation.
 - The Step 2 real-database tenant isolation suite remains outstanding.
+
+## 2026-11-08 — Step 6 identity verification and clearance
+
+### Done
+
+- Added migration 011 for tenant-scoped QR identities, school current term,
+  per-student allowances, and scoped fee-threshold rules.
+- Card QR codes now encode only an existing-or-once-issued 256-bit opaque
+  token at `https://{APP_BASE_URL}/v/{token}`. Card creation respects the
+  school card limit; no student number, internal id, or fee balance is encoded.
+- Added live token verification. Same-school school users see the full record;
+  public and cross-school visitors see only name, photo, class, school,
+  clearance verdict, and data-as-of timestamp. Invalid, unknown, and revoked
+  tokens share the same public response. Verification is noindex/no-referrer,
+  records scan outcomes without storing raw tokens, and is limited to 60
+  requests per minute per IP bucket.
+- Added read-time clearance evaluation in Africa/Kampala time, using exact
+  decimal comparisons and the required allowance, threshold, zero-balance,
+  then outstanding-balance precedence. School admins can manage allowances,
+  thresholds, and current term; changes are audited.
+- Retired the legacy public student-UID verification page so it no longer
+  exposes student data. Previously printed UID-based QR cards must be
+  reprinted to use the opaque-token verification route.
+- Added tests for time-zone boundary behavior, rule precedence/scopes/expiry,
+  public field allowlisting, same-school full access, token outcomes, and
+  rate limiting.
+
+### Verification
+
+- `npm.cmd test`: passed, 44 tests.
+- `npm.cmd run build`: passed; `/v/[token]` and clearance APIs compiled.
+- `node --check` on changed server modules and `git diff --check`: passed.
+- Migration 011 and the live QR/clearance database transactions were not
+  exercised against TiDB; no disposable test database is configured.
+
+### Next / known issues
+
+- Step 7: versioned school card templates and print/PDF designer. Keep fee
+  balance unavailable to card templates.
+- Step 2's real-database tenant isolation suite and migrations 007-011 live
+  verification remain outstanding. Existing printed QR cards using
+  `/verify/{student_uid}` need reprinting.

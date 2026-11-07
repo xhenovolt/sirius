@@ -1,5 +1,4 @@
 import { randomBytes } from "node:crypto";
-import { getDb } from "./db.js";
 import { assertTenantId, queryTenant, queryTenantOne, withTenantTransaction } from "./dbTenant.js";
 import { listSchoolUsers } from "./schoolUsers.js";
 import { checkCapacity } from "./entitlements.js";
@@ -73,7 +72,7 @@ export async function getStudentsForCards(schoolId) {
 export async function getSchoolSettings(schoolId) {
   return queryTenantOne(
     schoolId,
-    `SELECT school_id, school_name, school_code, address, contact_phone, contact_email, logo_url
+    `SELECT school_id, school_name, school_code, address, contact_phone, contact_email, logo_url, current_term
        FROM schools
       WHERE school_id = ?
       LIMIT 1`,
@@ -287,17 +286,4 @@ export async function updateStudentPhoto(schoolId, studentUid, photoUrl, session
     });
     return true;
   });
-}
-
-export async function getPublicStudentByUid(studentUid) {
-  const [rows] = await getDb().query(
-    `SELECT s.full_name, s.class_name, s.photo_url, s.updated_at AS data_as_of,
-            s.school_name, sc.school_name AS registered_school_name
-       FROM students s
-       LEFT JOIN schools sc ON sc.school_id = s.school_id
-      WHERE s.student_uid = ?
-      LIMIT 1`,
-    [studentUid],
-  );
-  return rows[0] || null;
 }

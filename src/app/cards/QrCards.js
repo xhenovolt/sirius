@@ -9,8 +9,7 @@ export default function QrCards({ students, school }) {
   useEffect(() => {
     let cancelled = false;
     Promise.all(students.map(async (student) => {
-      const verifyUrl = `${window.location.origin}/verify/${encodeURIComponent(student.student_uid)}`;
-      const dataUrl = await QRCode.toDataURL(verifyUrl, { width: 220, margin: 1, errorCorrectionLevel: school?.logo_url ? "H" : "M" });
+      const dataUrl = await QRCode.toDataURL(student.verifyUrl, { width: 220, margin: 1, errorCorrectionLevel: school?.logo_url ? "H" : "M" });
       if (!school?.logo_url) return [student.student_uid, dataUrl];
       const canvas = document.createElement("canvas"); canvas.width = 220; canvas.height = 220;
       const context = canvas.getContext("2d"); const qr = new Image(); const logo = new Image();

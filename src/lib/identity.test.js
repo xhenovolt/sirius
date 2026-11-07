@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   buildScanUrl,
   generatePublicToken,
+  getAppBaseUrl,
   isTokenShaped,
   issueIdentityWithin,
   resolveToken,
@@ -16,11 +17,11 @@ function createFakeExecutor() {
     identities,
     async query(sql, params = []) {
       if (sql.includes("COALESCE(MAX(version)")) {
-        const mine = identities.filter((row) => row.student_id === params[0]);
+        const mine = identities.filter((row) => row.school_id === params[0] && row.student_id === params[1]);
         return [[{ version: mine.length ? Math.max(...mine.map((row) => row.version)) + 1 : 1 }]];
       }
       if (sql.includes("INSERT INTO qr_identities")) {
-        const row = { id: identities.length + 1, student_id: params[0], public_token: params[1], version: params[2], revoked_at: null };
+        const row = { id: identities.length + 1, school_id: params[0], student_id: params[1], public_token: params[2], version: params[3], revoked_at: null };
         identities.push(row);
         return [{ insertId: row.id }];
       }
@@ -29,7 +30,7 @@ function createFakeExecutor() {
       }
       if (sql.includes("revoked_at IS NULL")) {
         const mine = identities
-          .filter((row) => row.student_id === params[0] && !row.revoked_at)
+          .filter((row) => row.school_id === params[0] && row.student_id === params[1] && !row.revoked_at)
           .sort((a, b) => b.version - a.version);
         return [mine.slice(0, 1)];
       }
@@ -57,8 +58,8 @@ test("isTokenShaped rejects malformed input", () => {
 
 test("issueIdentityWithin returns the same token on a second call", async () => {
   const executor = createFakeExecutor();
-  const first = await issueIdentityWithin(executor, 7);
-  const second = await issueIdentityWithin(executor, 7);
+  const first = await issueIdentityWithin(executor, "school-a", 7);
+  const second = await issueIdentityWithin(executor, "school-a", 7);
   assert.equal(first.public_token, second.public_token);
   assert.equal(first.id, second.id);
   assert.equal(executor.identities.length, 1);
@@ -66,9 +67,9 @@ test("issueIdentityWithin returns the same token on a second call", async () => 
 
 test("issueIdentityWithin mints a new versioned token after revocation", async () => {
   const executor = createFakeExecutor();
-  const original = await issueIdentityWithin(executor, 9);
+  const original = await issueIdentityWithin(executor, "school-a", 9);
   executor.identities[0].revoked_at = new Date();
-  const replacement = await issueIdentityWithin(executor, 9);
+  const replacement = await issueIdentityWithin(executor, "school-a", 9);
   assert.notEqual(replacement.public_token, original.public_token);
   assert.equal(replacement.version, 2);
   assert.equal(executor.identities.length, 2);
@@ -76,9 +77,18 @@ test("issueIdentityWithin mints a new versioned token after revocation", async (
 
 test("issueIdentityWithin keeps tokens isolated per student", async () => {
   const executor = createFakeExecutor();
-  const a = await issueIdentityWithin(executor, 1);
-  const b = await issueIdentityWithin(executor, 2);
+  const a = await issueIdentityWithin(executor, "school-a", 1);
+  const b = await issueIdentityWithin(executor, "school-a", 2);
   assert.notEqual(a.public_token, b.public_token);
+});
+
+test("issueIdentityWithin scopes the same student id by school", async () => {
+  const executor = createFakeExecutor();
+  const a = await issueIdentityWithin(executor, "school-a", 1);
+  const b = await issueIdentityWithin(executor, "school-b", 1);
+
+  assert.notEqual(a.public_token, b.public_token);
+  assert.equal(executor.identities.length, 2);
 });
 
 test("resolveToken classifies invalid, unknown, revoked and resolved", async () => {
@@ -86,19 +96,22 @@ test("resolveToken classifies invalid, unknown, revoked and resolved", async () 
   assert.equal((await resolveToken(executor, "not a token")).outcome, "invalid");
   assert.equal((await resolveToken(executor, generatePublicToken())).outcome, "unknown");
 
-  const identity = await issueIdentityWithin(executor, 5);
+  const identity = await issueIdentityWithin(executor, "school-a", 5);
   const resolved = await resolveToken(executor, identity.public_token);
   assert.equal(resolved.outcome, "resolved");
   assert.equal(resolved.identity.student_id, 5);
+  assert.equal(resolved.identity.school_id, "school-a");
 
   executor.identities[0].revoked_at = new Date();
   assert.equal((await resolveToken(executor, identity.public_token)).outcome, "revoked");
 });
 
-test("buildScanUrl emits an https /s/{token} URL", () => {
+test("buildScanUrl emits an https /v/{token} URL", () => {
   const token = generatePublicToken();
-  assert.equal(buildScanUrl(token, "sirius.example.com"), `https://sirius.example.com/s/${token}`);
-  assert.equal(buildScanUrl(token, "https://sirius.example.com/"), `https://sirius.example.com/s/${token}`);
+  assert.equal(getAppBaseUrl("https://sirius.example.com/"), "https://sirius.example.com");
+  assert.equal(buildScanUrl(token, "sirius.example.com"), `https://sirius.example.com/v/${token}`);
+  assert.equal(buildScanUrl(token, "https://sirius.example.com/"), `https://sirius.example.com/v/${token}`);
   assert.throws(() => buildScanUrl(token, ""), /APP_BASE_URL/);
   assert.throws(() => buildScanUrl("nope", "sirius.example.com"), /malformed token/);
+  assert.throws(() => buildScanUrl(token, "sirius.example.com/path"), /hostname/);
 });
