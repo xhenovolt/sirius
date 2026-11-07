@@ -2,10 +2,13 @@
   "name": "sirius",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "test": "node --test",
+    "migrate": "node scripts/migrate.mjs",
     "verify:db": "node scripts/verify-db.mjs",
     "cleanup:auth": "node scripts/cleanup-auth.mjs",
     "provision:admin": "node scripts/provision-admin.mjs",

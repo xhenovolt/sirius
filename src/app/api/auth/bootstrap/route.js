@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createUser } from "@/lib/auth";
+import { superAdminSlug } from "@/lib/tenancy";
 import { getDb } from "@/lib/db";
 
 export async function POST(request) {
@@ -9,7 +10,7 @@ export async function POST(request) {
     if (!email || !password || !displayName || password.length < 12) return NextResponse.json({ error: "A name, email, and password of at least 12 characters are required." }, { status: 400 });
     const [[count]] = await getDb().query("SELECT COUNT(*) AS count FROM users");
     if (Number(count.count) > 0) return NextResponse.json({ error: "Initial administrator already exists." }, { status: 409 });
-    await createUser(email, password, displayName, "");
+    await createUser({ schoolId: "default", email, password, displayName, phone: "", roleSlug: superAdminSlug });
     return NextResponse.json({ created: true }, { status: 201 });
   } catch (error) {
     console.error("Auth bootstrap failed", error);

@@ -1,16 +1,16 @@
 import { NextResponse } from "next/server";
-import { createUser, requireAdmin, terminateUserSessions } from "@/lib/auth";
+import { createUser, requireSchoolAdmin, terminateUserSessions } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { getSchoolSettings, getUsers } from "@/lib/students";
 import { recordAuditLog } from "@/lib/audit";
 
 export async function GET() {
-  if (!(await requireAdmin())) return NextResponse.json({ error: "Administrator access required." }, { status: 403 });
+  if (!(await requireSchoolAdmin())) return NextResponse.json({ error: "Administrator access required." }, { status: 403 });
   try { return NextResponse.json({ school: await getSchoolSettings(), users: await getUsers() }); } catch (error) { console.error("Settings load failed", error); return NextResponse.json({ error: "Unable to load settings." }, { status: 503 }); }
 }
 
 export async function PUT(request) {
-  const admin = await requireAdmin();
+  const admin = await requireSchoolAdmin();
   if (!admin) return NextResponse.json({ error: "Administrator access required." }, { status: 403 });
   try {
     const body = await request.json();
@@ -22,7 +22,7 @@ export async function PUT(request) {
 }
 
 export async function PATCH(request) {
-  const admin = await requireAdmin();
+  const admin = await requireSchoolAdmin();
   if (!admin) return NextResponse.json({ error: "Administrator access required." }, { status: 403 });
   try {
     const body = await request.json();
@@ -40,13 +40,13 @@ export async function PATCH(request) {
 }
 
 export async function POST(request) {
-  const admin = await requireAdmin();
+  const admin = await requireSchoolAdmin();
   if (!admin) return NextResponse.json({ error: "Administrator access required." }, { status: 403 });
   try {
     const body = await request.json();
     if (!body.displayName?.trim() || !body.email?.trim() || !body.password || body.password.length < 12) return NextResponse.json({ error: "Name, email, and a password of at least 12 characters are required." }, { status: 400 });
     const role = body.role === "admin" ? "admin" : "operator";
-    await createUser(body.email.trim(), body.password, body.displayName.trim(), body.phone?.trim() || "", role);
+    await createUser({ schoolId: admin.school_id, email: body.email.trim(), password: body.password, displayName: body.displayName.trim(), phone: body.phone?.trim() || "", roleSlug: role, createdBy: admin.id });
     await recordAuditLog({ session: admin, request, action: "user.created", entityType: "user", entityId: body.email.trim(), details: { role } });
     return NextResponse.json({ created: true }, { status: 201 });
   } catch (error) {

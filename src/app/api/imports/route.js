@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import ExcelJS from "exceljs";
-import { commitImport, normalizeRows } from "@/lib/imports";
+import { ImportError, stageImport } from "@/lib/imports";
 import { getSession } from "@/lib/auth";
 import { recordAuditLog } from "@/lib/audit";
 
@@ -22,32 +22,47 @@ async function parseSpreadsheet(buffer, fileName) {
   return rows;
 }
 
+/**
+ * Stages an uploaded spreadsheet into import_rows. Nothing is written to
+ * students here: the batch is reviewed, then committed from
+ * /api/imports/[batchId].
+ */
 export async function POST(request) {
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+
   try {
-    if (!(await getSession())) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
     const contentType = request.headers.get("content-type") || "";
-    if (contentType.includes("multipart/form-data")) {
-      const formData = await request.formData();
-      const file = formData.get("file");
-      if (!file || typeof file.arrayBuffer !== "function" || !/\.(xlsx|csv)$/i.test(file.name)) {
-        return NextResponse.json({ error: "Please upload an .xlsx or .csv file." }, { status: 400 });
-      }
-      if (file.size > 10 * 1024 * 1024) {
-        return NextResponse.json({ error: "The spreadsheet must be smaller than 10 MB." }, { status: 400 });
-      }
-      const rows = normalizeRows(await parseSpreadsheet(Buffer.from(await file.arrayBuffer()), file.name));
-      return NextResponse.json({ fileName: file.name, rows, total: rows.length, valid: rows.filter((row) => row.valid).length });
+    if (!contentType.includes("multipart/form-data")) {
+      return NextResponse.json({ error: "Upload the spreadsheet as form data." }, { status: 400 });
     }
 
-    const body = await request.json();
-    if (!body.fileName || !Array.isArray(body.rows) || body.rows.length > 10000) {
-      return NextResponse.json({ error: "Invalid import preview." }, { status: 400 });
+    const formData = await request.formData();
+    const file = formData.get("file");
+    if (!file || typeof file.arrayBuffer !== "function" || !file.name) {
+      return NextResponse.json({ error: "Please choose a spreadsheet to upload." }, { status: 400 });
     }
-    const result = await commitImport(body.fileName, normalizeRows(body.rows));
-    await recordAuditLog({ session: await getSession(), request, action: "import.committed", entityType: "import_batch", entityId: body.fileName, details: result });
+    if (!/\.(xlsx|csv)$/i.test(file.name)) {
+      return NextResponse.json({ error: "Please upload an .xlsx or .csv file." }, { status: 400 });
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      return NextResponse.json({ error: "The spreadsheet must be smaller than 10 MB." }, { status: 400 });
+    }
+
+    const rows = await parseSpreadsheet(Buffer.from(await file.arrayBuffer()), file.name);
+    const result = await stageImport({ fileName: file.name, rows, schoolId: session.school_id || "default" });
+    await recordAuditLog({
+      session,
+      request,
+      action: "import.staged",
+      entityType: "import_batch",
+      entityId: String(result.batchId),
+      details: { fileName: result.fileName, total: result.total, valid: result.valid, invalid: result.invalid },
+    });
     return NextResponse.json(result);
   } catch (error) {
-    console.error("Student import failed", error);
-    return NextResponse.json({ error: "Unable to import spreadsheet. Please check the file format." }, { status: 500 });
+    if (error instanceof ImportError) return NextResponse.json({ error: error.message }, { status: error.status });
+    console.error("Student import staging failed", error);
+    return NextResponse.json({ error: "Unable to read the spreadsheet. Please check the file format." }, { status: 500 });
   }
 }

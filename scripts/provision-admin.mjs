@@ -15,13 +15,22 @@ if (!email || !password || password.length < 12) throw new Error("Set SIRIUS_ADM
 
 const passwordHash = await bcrypt.hash(password, 12);
 const db = getDb();
+const [roleRows] = await db.query("SELECT id FROM roles WHERE school_id = 'default' AND slug = 'superadmin' LIMIT 1");
+const superAdminRoleId = roleRows[0]?.id;
+if (!superAdminRoleId) throw new Error("The default school's superadmin role is missing. Run `npm run migrate` first.");
+
 const [existing] = await db.query("SELECT id FROM users WHERE email = ? LIMIT 1", [email]);
+let userId;
 if (existing[0]) {
-  await db.query("UPDATE users SET password_hash = ?, role = 'admin', status = 'active', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [passwordHash, existing[0].id]);
-  await db.query("DELETE FROM sessions WHERE user_id = ?", [existing[0].id]);
+  userId = existing[0].id;
+  await db.query("UPDATE users SET password_hash = ?, role = 'admin', status = 'active', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [passwordHash, userId]);
+  await db.query("DELETE FROM sessions WHERE user_id = ?", [userId]);
   console.log("Administrator account updated.");
 } else {
-  await db.query("INSERT INTO users (school_id, email, phone, display_name, password_hash, role, status) VALUES ('default', ?, '', 'Xhenvolt Administrator', ?, 'admin', 'active')", [email, passwordHash]);
+  const [result] = await db.query("INSERT INTO users (school_id, email, phone, display_name, password_hash, role, status) VALUES ('default', ?, '', 'Xhenvolt Administrator', ?, 'admin', 'active')", [email, passwordHash]);
+  userId = result.insertId;
   console.log("Administrator account created.");
 }
+// Superadmin is DERIVED from user_roles, so the membership must exist too.
+await db.query("INSERT IGNORE INTO user_roles (user_id, role_id, school_id, is_active, assigned_at) VALUES (?, ?, 'default', 1, CURRENT_TIMESTAMP)", [userId, superAdminRoleId]);
 await db.end();

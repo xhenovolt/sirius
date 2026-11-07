@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/auth";
+import { requireSchoolAdmin } from "@/lib/auth";
 import { listAuditLogs } from "@/lib/audit";
 
 export async function GET() {
-  if (!(await requireAdmin())) return NextResponse.json({ error: "Administrator access required." }, { status: 403 });
+  if (!(await requireSchoolAdmin())) return NextResponse.json({ error: "Administrator access required." }, { status: 403 });
   try {
     return NextResponse.json({ logs: await listAuditLogs(200) });
   } catch (error) {
