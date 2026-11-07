@@ -8,12 +8,13 @@ import LogoutButton from "../LogoutButton";
 export const dynamic = "force-dynamic";
 
 export default async function CardsPage() {
-  if (!(await getSession())) redirect("/login");
+  const session = await getSession();
+  if (!session) redirect("/login");
   let students = [];
   let school = null;
   let databaseError = false;
   try {
-    [students, school] = await Promise.all([getStudentsForCards(), getSchoolSettings()]);
+    [students, school] = await Promise.all([getStudentsForCards(session.school_id), getSchoolSettings(session.school_id)]);
   } catch (error) {
     console.error("Card records load failed", error);
     databaseError = true;

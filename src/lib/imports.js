@@ -1,4 +1,5 @@
 import { getDb } from "./db.js";
+import { assertTenantId, queryTenant, queryTenantOne } from "./dbTenant.js";
 
 const requiredFields = ["admission_number", "first_name", "last_name"];
 
@@ -120,7 +121,8 @@ function shapeRow(row) {
  * Puts parsed spreadsheet rows into import_rows staging. Nothing here touches
  * students; the only writer of student data is commitImportBatch.
  */
-export async function stageImport({ fileName, rows, schoolId = "default" }) {
+export async function stageImport({ fileName, rows, schoolId }) {
+  assertTenantId(schoolId);
   if (!Array.isArray(rows) || rows.length === 0) throw new ImportError("The spreadsheet did not contain any student rows.");
   if (rows.length > maxImportRows) throw new ImportError(`This file has ${rows.length} rows. Import at most ${maxImportRows} rows at a time.`);
 
@@ -143,6 +145,7 @@ export async function stageImport({ fileName, rows, schoolId = "default" }) {
     const batchId = batch.insertId;
 
     const values = staged.map((row) => [
+      schoolId,
       batchId,
       row.rowNumber,
       row.data.admission_number || null,
@@ -154,7 +157,7 @@ export async function stageImport({ fileName, rows, schoolId = "default" }) {
     ]);
     for (let index = 0; index < values.length; index += insertChunkSize) {
       await connection.query(
-        "INSERT INTO import_rows (batch_id, `row_number`, admission_number, full_name, extracted, errors, photo_ref, status) VALUES ?",
+        "INSERT INTO import_rows (school_id, batch_id, `row_number`, admission_number, full_name, extracted, errors, photo_ref, status) VALUES ?",
         [values.slice(index, index + insertChunkSize)],
       );
     }
@@ -169,13 +172,13 @@ export async function stageImport({ fileName, rows, schoolId = "default" }) {
   }
 }
 
-export async function getImportBatch(batchId) {
-  const [rows] = await getDb().query(
+export async function getImportBatch(batchId, schoolId) {
+  const batch = await queryTenantOne(
+    schoolId,
     `SELECT id, school_id, file_name, total_rows, valid_rows, invalid_rows, imported_rows, status, error_message, created_at, completed_at
-     FROM import_batches WHERE id = ? LIMIT 1`,
-    [batchId],
+     FROM import_batches WHERE id = ? AND school_id = ? LIMIT 1`,
+    [batchId, schoolId],
   );
-  const batch = rows[0];
   if (!batch) return null;
   return {
     id: batch.id,
@@ -192,21 +195,23 @@ export async function getImportBatch(batchId) {
   };
 }
 
-export async function listImportRows(batchId, { page = 1, pageSize = defaultPageSize, filter = "all" } = {}) {
+export async function listImportRows(batchId, schoolId, { page = 1, pageSize = defaultPageSize, filter = "all" } = {}) {
   const size = Math.min(Math.max(Number(pageSize) || defaultPageSize, 1), maxPageSize);
   const statusFilter = filter === "invalid" ? "AND status = 'invalid'" : "";
 
-  const [[counts]] = await getDb().query(
-    `SELECT COUNT(*) AS total FROM import_rows WHERE batch_id = ? ${statusFilter}`,
-    [batchId],
+  const [[counts]] = await queryTenant(
+    schoolId,
+    `SELECT COUNT(*) AS total FROM import_rows WHERE batch_id = ? AND school_id = ? ${statusFilter}`,
+    [batchId, schoolId],
   );
   // Clamp to the last page: fixing rows shrinks the filtered list underneath the reviewer.
   const current = Math.min(Math.max(Number(page) || 1, 1), Math.max(1, Math.ceil(counts.total / size)));
-  const [rows] = await getDb().query(
+  const [rows] = await queryTenant(
+    schoolId,
     `SELECT id, \`row_number\`, admission_number, full_name, extracted, errors, status, student_id
-     FROM import_rows WHERE batch_id = ? ${statusFilter}
+     FROM import_rows WHERE batch_id = ? AND school_id = ? ${statusFilter}
      ORDER BY \`row_number\` LIMIT ? OFFSET ?`,
-    [batchId, size, (current - 1) * size],
+    [batchId, schoolId, size, (current - 1) * size],
   );
 
   return { page: current, pageSize: size, total: counts.total, rows: rows.map(shapeRow) };
@@ -217,12 +222,12 @@ export async function listImportRows(batchId, { page = 1, pageSize = defaultPage
  * detection is batch-wide, so editing one row can flip the status of another;
  * every mismatched row is rewritten.
  */
-async function revalidateBatch(executor, batchId) {
+async function revalidateBatch(executor, batchId, schoolId) {
   const [rows] = await executor.query(
     `SELECT id, admission_number, extracted, errors, status FROM import_rows
-     WHERE batch_id = ? AND status IN ('pending', 'valid', 'invalid')
+     WHERE batch_id = ? AND school_id = ? AND status IN ('pending', 'valid', 'invalid')
      ORDER BY \`row_number\``,
-    [batchId],
+    [batchId, schoolId],
   );
   const duplicates = duplicateAdmissionsFrom(rows.map((row) => row.admission_number));
   let valid = 0;
@@ -232,36 +237,38 @@ async function revalidateBatch(executor, batchId) {
     const status = errors.length ? "invalid" : "valid";
     if (status === "valid") valid += 1;
     if (status !== row.status || toJson(errors) !== toJson(fromJson(row.errors) || [])) {
-      await executor.query("UPDATE import_rows SET errors = ?, status = ? WHERE id = ?", [toJson(errors), status, row.id]);
+      await executor.query("UPDATE import_rows SET errors = ?, status = ? WHERE id = ? AND school_id = ?", [toJson(errors), status, row.id, schoolId]);
     }
   }
 
   const summary = { total: rows.length, valid, invalid: rows.length - valid };
-  await executor.query("UPDATE import_batches SET total_rows = ?, valid_rows = ?, invalid_rows = ? WHERE id = ?", [
+  await executor.query("UPDATE import_batches SET total_rows = ?, valid_rows = ?, invalid_rows = ? WHERE id = ? AND school_id = ?", [
     summary.total,
     summary.valid,
     summary.invalid,
     batchId,
+    schoolId,
   ]);
   return summary;
 }
 
 /** Applies reviewed corrections to staged rows, then revalidates the batch. */
-export async function updateImportRows(batchId, updates) {
+export async function updateImportRows(batchId, schoolId, updates) {
+  assertTenantId(schoolId);
   if (!Array.isArray(updates) || updates.length === 0) throw new ImportError("No row changes were provided.");
   if (updates.length > maxPageSize) throw new ImportError(`Save at most ${maxPageSize} rows at a time.`);
 
   const connection = await getDb().getConnection();
   try {
     await connection.beginTransaction();
-    const [batchRows] = await connection.query("SELECT id, status FROM import_batches WHERE id = ? FOR UPDATE", [batchId]);
+    const [batchRows] = await connection.query("SELECT id, status FROM import_batches WHERE id = ? AND school_id = ? FOR UPDATE", [batchId, schoolId]);
     const batch = batchRows[0];
     if (!batch) throw new ImportError("Import batch not found.", 404);
     if (batch.status === "completed") throw new ImportError("This import has already been committed.", 409);
 
     const [stagedRows] = await connection.query(
-      "SELECT id FROM import_rows WHERE batch_id = ? AND status IN ('pending', 'valid', 'invalid')",
-      [batchId],
+      "SELECT id FROM import_rows WHERE batch_id = ? AND school_id = ? AND status IN ('pending', 'valid', 'invalid')",
+      [batchId, schoolId],
     );
     const editable = new Set(stagedRows.map((row) => row.id));
 
@@ -271,12 +278,12 @@ export async function updateImportRows(batchId, updates) {
       const data = normalizeRow(update);
       await connection.query(
         `UPDATE import_rows SET extracted = ?, admission_number = ?, full_name = ?, photo_ref = ?
-         WHERE id = ? AND batch_id = ?`,
-        [toJson(data), data.admission_number || null, `${data.first_name} ${data.last_name}`.trim() || null, data.photo_url || null, id, batchId],
+         WHERE id = ? AND batch_id = ? AND school_id = ?`,
+        [toJson(data), data.admission_number || null, `${data.first_name} ${data.last_name}`.trim() || null, data.photo_url || null, id, batchId, schoolId],
       );
     }
 
-    const summary = await revalidateBatch(connection, batchId);
+    const summary = await revalidateBatch(connection, batchId, schoolId);
     await connection.commit();
     return summary;
   } catch (error) {
@@ -309,7 +316,8 @@ const upsertStudentSql = `
  * matched on the natural key (school_id, admission_number) so a re-import
  * updates the existing record instead of creating a duplicate.
  */
-export async function commitImportBatch(batchId, schoolId = "default") {
+export async function commitImportBatch(batchId, schoolId) {
+  assertTenantId(schoolId);
   const connection = await getDb().getConnection();
   try {
     await connection.beginTransaction();
@@ -321,12 +329,12 @@ export async function commitImportBatch(batchId, schoolId = "default") {
     if (!batch) throw new ImportError("Import batch not found.", 404);
     if (batch.status === "completed") throw new ImportError("This import has already been committed.", 409);
 
-    const summary = await revalidateBatch(connection, batchId);
+    const summary = await revalidateBatch(connection, batchId, schoolId);
     if (summary.valid === 0) throw new ImportError("There are no valid rows to import. Correct the flagged rows first.");
 
     const [stagedRows] = await connection.query(
-      "SELECT id, extracted FROM import_rows WHERE batch_id = ? AND status = 'valid' ORDER BY `row_number`",
-      [batchId],
+      "SELECT id, extracted FROM import_rows WHERE batch_id = ? AND school_id = ? AND status = 'valid' ORDER BY `row_number`",
+      [batchId, schoolId],
     );
     const rows = stagedRows.map((row) => ({ id: row.id, extracted: fromJson(row.extracted) || {} }));
     const [[school]] = await connection.query("SELECT school_name FROM schools WHERE school_id = ? LIMIT 1", [schoolId]);
@@ -362,14 +370,14 @@ export async function commitImportBatch(batchId, schoolId = "default") {
         batchId,
       ]);
       const studentId = existing.get(student.admission_number.toLowerCase()) ?? result.insertId;
-      await connection.query("UPDATE import_rows SET student_id = ?, status = 'committed' WHERE id = ?", [studentId, row.id]);
+      await connection.query("UPDATE import_rows SET student_id = ?, status = 'committed' WHERE id = ? AND school_id = ?", [studentId, row.id, schoolId]);
       imported += 1;
     }
 
-    await connection.query("UPDATE import_rows SET status = 'skipped' WHERE batch_id = ? AND status = 'invalid'", [batchId]);
+    await connection.query("UPDATE import_rows SET status = 'skipped' WHERE batch_id = ? AND school_id = ? AND status = 'invalid'", [batchId, schoolId]);
     await connection.query(
-      "UPDATE import_batches SET imported_rows = ?, invalid_rows = ?, status = 'completed', completed_at = CURRENT_TIMESTAMP WHERE id = ?",
-      [imported, summary.invalid, batchId],
+      "UPDATE import_batches SET imported_rows = ?, invalid_rows = ?, status = 'completed', completed_at = CURRENT_TIMESTAMP WHERE id = ? AND school_id = ?",
+      [imported, summary.invalid, batchId, schoolId],
     );
     await connection.commit();
     return { batchId, imported, skipped: summary.invalid };

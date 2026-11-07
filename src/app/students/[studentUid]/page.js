@@ -8,13 +8,14 @@ import PhotoUpload from "./PhotoUpload";
 export const dynamic = "force-dynamic";
 
 export default async function StudentProfilePage({ params }) {
-  if (!(await getSession())) redirect("/login");
+  const session = await getSession();
+  if (!session) redirect("/login");
   const { studentUid } = await params;
   let student = null;
   let databaseError = false;
 
   try {
-    student = await getStudentByUid(studentUid);
+    student = await getStudentByUid(session.school_id, studentUid);
   } catch (error) {
     console.error("Student profile load failed", error);
     databaseError = true;

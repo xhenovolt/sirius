@@ -84,7 +84,7 @@ CREATE TABLE IF NOT EXISTS import_batches (
 
 CREATE TABLE IF NOT EXISTS students (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  school_id VARCHAR(64) NOT NULL DEFAULT 'default',
+  school_id VARCHAR(64) NOT NULL,
   student_uid VARCHAR(64) NOT NULL,
   admission_number VARCHAR(64) NOT NULL,
   first_name VARCHAR(100) NOT NULL,

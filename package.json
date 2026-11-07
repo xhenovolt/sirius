@@ -7,7 +7,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "node --test",
+    "test": "node --test --experimental-test-module-mocks",
     "migrate": "node scripts/migrate.mjs",
     "verify:db": "node scripts/verify-db.mjs",
     "cleanup:auth": "node scripts/cleanup-auth.mjs",

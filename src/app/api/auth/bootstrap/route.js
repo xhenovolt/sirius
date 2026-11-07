@@ -10,6 +10,9 @@ export async function POST(request) {
     if (!email || !password || !displayName || password.length < 12) return NextResponse.json({ error: "A name, email, and password of at least 12 characters are required." }, { status: 400 });
     const [[count]] = await getDb().query("SELECT COUNT(*) AS count FROM users");
     if (Number(count.count) > 0) return NextResponse.json({ error: "Initial administrator already exists." }, { status: 409 });
+    // Platform bootstrap only: seeds the first superadmin into the seeded
+    // 'default' school on an empty database. Real schools come from /signup,
+    // which creates their own tenant. This never derives a tenant from input.
     await createUser({ schoolId: "default", email, password, displayName, phone: "", roleSlug: superAdminSlug });
     return NextResponse.json({ created: true }, { status: 201 });
   } catch (error) {

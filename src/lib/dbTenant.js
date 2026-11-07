@@ -15,10 +15,16 @@ import { getDb } from "./db.js";
  * This mirrors the DRAIS `assertTenantSafe`/`queryTenant` shape, but the tenant
  * is a required first argument rather than an optional trailing one.
  */
-export function assertTenantSafe(sql, schoolId) {
+/** Fail-closed tenant-id check, shared by every scoped entry point. */
+export function assertTenantId(schoolId) {
   if (schoolId === null || schoolId === undefined || String(schoolId).trim() === "") {
     throw new Error(`[dbTenant] FATAL: missing tenant id (got ${JSON.stringify(schoolId)}).`);
   }
+  return schoolId;
+}
+
+export function assertTenantSafe(sql, schoolId) {
+  assertTenantId(schoolId);
   if (typeof sql !== "string" || !/school_id/i.test(sql)) {
     throw new Error(
       `[dbTenant] UNSAFE QUERY: SQL does not reference school_id.\nQuery: ${String(sql).slice(0, 200)}`,
@@ -44,9 +50,7 @@ export async function queryTenantOne(schoolId, sql, params = []) {
  * callers can use escape-free helpers when they truly need an unscoped read.
  */
 export async function withTenantTransaction(schoolId, work) {
-  if (schoolId === null || schoolId === undefined || String(schoolId).trim() === "") {
-    throw new Error(`[dbTenant] FATAL: missing tenant id (got ${JSON.stringify(schoolId)}).`);
-  }
+  assertTenantId(schoolId);
   const connection = await getDb().getConnection();
   try {
     await connection.beginTransaction();

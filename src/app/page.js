@@ -14,7 +14,7 @@ export default async function Home() {
   let recentImports = [];
   let databaseError = false;
   try {
-    [summary, recentImports, school] = await Promise.all([getStudentSummary(), getRecentImports(), getSchoolSettings()]);
+    [summary, recentImports, school] = await Promise.all([getStudentSummary(session.school_id), getRecentImports(session.school_id), getSchoolSettings(session.school_id)]);
   } catch (error) {
     console.error("Dashboard load failed", error);
     databaseError = true;

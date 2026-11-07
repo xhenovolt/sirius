@@ -7,14 +7,15 @@ import LogoutButton from "../LogoutButton";
 export const dynamic = "force-dynamic";
 
 export default async function StudentsPage({ searchParams }) {
-  if (!(await getSession())) redirect("/login");
+  const session = await getSession();
+  if (!session) redirect("/login");
   const params = await searchParams;
   const search = typeof params?.search === "string" ? params.search : "";
   let students = [];
   let databaseError = false;
 
   try {
-    students = await searchStudents(search);
+    students = await searchStudents(session.school_id, search);
   } catch (error) {
     console.error("Students page load failed", error);
     databaseError = true;

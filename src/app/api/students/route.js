@@ -3,7 +3,8 @@ import { searchStudents } from "@/lib/students";
 import { getSession } from "@/lib/auth";
 
 export async function GET(request) {
-  if (!(await getSession())) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
   const search = request.nextUrl.searchParams.get("search") || "";
 
   if (search.length > 100) {
@@ -11,7 +12,7 @@ export async function GET(request) {
   }
 
   try {
-    return NextResponse.json({ students: await searchStudents(search) });
+    return NextResponse.json({ students: await searchStudents(session.school_id, search) });
   } catch (error) {
     console.error("Student search failed", error);
     return NextResponse.json({ error: "Unable to connect to student records. Please try again." }, { status: 503 });

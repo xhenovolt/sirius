@@ -1,4 +1,5 @@
-import { getDb } from "./db";
+import { getDb } from "./db.js";
+import { queryTenant } from "./dbTenant.js";
 
 function clientIp(request) {
   const forwarded = request?.headers?.get?.("x-forwarded-for");
@@ -7,12 +8,20 @@ function clientIp(request) {
 }
 
 export async function recordAuditLog({ session, request, action, entityType = null, entityId = null, details = null }) {
+  // The tenant comes from the session, never from the caller. A session
+  // without a school_id is a bug, and a mislabelled audit row is worse than
+  // a missing one — so skip loudly rather than default the tenant.
+  const schoolId = session?.school_id;
+  if (!schoolId) {
+    console.error("Audit log skipped: the session has no school_id.");
+    return;
+  }
   try {
     await getDb().query(
       `INSERT INTO audit_logs (school_id, user_id, actor_email, action, entity_type, entity_id, details, ip_address, user_agent)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        session?.school_id || "default",
+        schoolId,
         session?.id || null,
         session?.email || null,
         action,
@@ -29,13 +38,15 @@ export async function recordAuditLog({ session, request, action, entityType = nu
   }
 }
 
-export async function listAuditLogs(limit = 100) {
-  const [rows] = await getDb().query(
+export async function listAuditLogs(schoolId, limit = 100) {
+  const [rows] = await queryTenant(
+    schoolId,
     `SELECT id, user_id, actor_email, action, entity_type, entity_id, details, ip_address, created_at
      FROM audit_logs
+     WHERE school_id = ?
      ORDER BY created_at DESC
      LIMIT ?`,
-    [Number(limit)],
+    [schoolId, Number(limit)],
   );
   return rows;
 }

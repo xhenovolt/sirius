@@ -50,7 +50,7 @@ export async function POST(request) {
     }
 
     const rows = await parseSpreadsheet(Buffer.from(await file.arrayBuffer()), file.name);
-    const result = await stageImport({ fileName: file.name, rows, schoolId: session.school_id || "default" });
+    const result = await stageImport({ fileName: file.name, rows, schoolId: session.school_id });
     await recordAuditLog({
       session,
       request,

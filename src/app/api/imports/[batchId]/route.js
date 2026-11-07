@@ -12,9 +12,11 @@ async function readBatchId(params) {
 }
 
 async function loadBatch(session, batchId, { page, pageSize, filter }) {
-  const batch = await getImportBatch(batchId);
-  if (!batch || batch.schoolId !== (session.school_id || "default")) return null;
-  const list = await listImportRows(batchId, { page, pageSize, filter });
+  // Both reads are tenant-scoped, so a batch from another school is simply
+  // "not found" rather than an authorisation decision we might get wrong.
+  const batch = await getImportBatch(batchId, session.school_id);
+  if (!batch) return null;
+  const list = await listImportRows(batchId, session.school_id, { page, pageSize, filter });
   return { batch, ...list };
 }
 
@@ -54,7 +56,7 @@ export async function PATCH(request, { params }) {
 
   try {
     const body = await request.json();
-    await updateImportRows(batchId, body?.rows);
+    await updateImportRows(batchId, session.school_id, body?.rows);
     const search = new URL(request.url).searchParams;
     const payload = await loadBatch(session, batchId, {
       page: body?.page ?? search.get("page"),
@@ -76,7 +78,7 @@ export async function POST(request, { params }) {
   if (!batchId) return NextResponse.json({ error: "Invalid import batch." }, { status: 400 });
 
   try {
-    const result = await commitImportBatch(batchId, session.school_id || "default");
+    const result = await commitImportBatch(batchId, session.school_id);
     await recordAuditLog({
       session,
       request,
