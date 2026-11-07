@@ -332,3 +332,35 @@ remediation commits were made as part of this audit.
   with permanent public tokens and complete clearance verification behavior.
 - The prior push was denied with HTTP 403. No remote or credential workaround
   was attempted; retry only after repository permissions are corrected.
+
+## 2026-11-07 — Step 5a immutable import source and versions
+
+### Done
+
+- Import uploads now retain the original file bytes, file name, content type,
+  and SHA-256 digest in tenant-scoped storage. This first version is immutable
+  through the application.
+- Initial staged rows are snapshotted as version 1. Each saved correction
+  creates a compressed, immutable full-batch snapshot and advances the current
+  version. The import review UI lists recent batches and provides original-file
+  and per-version XLSX/CSV downloads, including after commit.
+- Import staging, correction, and commit transactions now use the tenant-scoped
+  transaction layer for each tenant-table query.
+
+### Verification
+
+- `npm.cmd test`: passed, 27 tests.
+- `npm.cmd run build`: passed; the new authenticated version-download route
+  compiled and was enumerated by Next.js.
+- `node --check` on the changed import modules and `git diff --check`: passed.
+- Migration 007 was not applied because no dedicated disposable TiDB database
+  is configured. Source retention, snapshot export, and migration behavior
+  have not been exercised against TiDB.
+
+### Next / known issues
+
+- Step 5 remains in progress: implement current-record diffs, row/field
+  accept/reject, deterministic column mapping templates, and committed-batch
+  rollback.
+- The Step 2 real-database isolation suite and migration verification remain
+  outstanding.

@@ -49,3 +49,4 @@ The importer also recognizes these alternative headings:
 - Blank optional cells are stored as empty values.
 - The importer previews all rows first and imports only valid rows when confirmed.
 - Sirius assigns its internal student identifier independently of the imported student account number.
+- The uploaded source file is retained unchanged with its SHA-256 digest. Saving staged-row edits creates a downloadable version snapshot; the original and each snapshot can be exported as XLSX or CSV from import history.

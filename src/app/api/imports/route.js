@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import ExcelJS from "exceljs";
-import { ImportError, stageImport } from "@/lib/imports";
+import { ImportError, listImportBatches, stageImport } from "@/lib/imports";
 import { getSession } from "@/lib/auth";
 import { recordAuditLog } from "@/lib/audit";
 
@@ -20,6 +20,17 @@ async function parseSpreadsheet(buffer, fileName) {
     if (values.some((value) => value !== null && value !== undefined && String(value).trim() !== "")) rows.push(Object.fromEntries(headers.map((header, index) => [header, values[index] ?? ""])));
   });
   return rows;
+}
+
+export async function GET() {
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+  try {
+    return NextResponse.json({ batches: await listImportBatches(session.school_id) });
+  } catch (error) {
+    console.error("Import history load failed", error);
+    return NextResponse.json({ error: "Unable to load import history." }, { status: 500 });
+  }
 }
 
 /**
@@ -49,8 +60,16 @@ export async function POST(request) {
       return NextResponse.json({ error: "The spreadsheet must be smaller than 10 MB." }, { status: 400 });
     }
 
-    const rows = await parseSpreadsheet(Buffer.from(await file.arrayBuffer()), file.name);
-    const result = await stageImport({ fileName: file.name, rows, schoolId: session.school_id });
+    const sourceFile = Buffer.from(await file.arrayBuffer());
+    const rows = await parseSpreadsheet(sourceFile, file.name);
+    const result = await stageImport({
+      fileName: file.name,
+      rows,
+      schoolId: session.school_id,
+      sourceFile,
+      contentType: file.type,
+      createdBy: session.id,
+    });
     await recordAuditLog({
       session,
       request,

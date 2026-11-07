@@ -39,6 +39,8 @@ export default function ImportPage() {
   const [drafts, setDrafts] = useState({});
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
+  const [versions, setVersions] = useState([]);
+  const [history, setHistory] = useState([]);
   const [filter, setFilter] = useState("all");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -48,6 +50,16 @@ export default function ImportPage() {
     fetch("/api/auth/session").then((response) => {
       if (response.status === 401) window.location.href = "/login";
     });
+    fetch("/api/imports")
+      .then(async (response) => {
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Unable to load import history.");
+        setHistory(result.batches || []);
+      })
+      .catch((requestError) => {
+        console.error("Import history request failed", requestError);
+        setError("Unable to load import history. Refresh the page to try again.");
+      });
   }, []);
 
   function applyPayload(payload) {
@@ -56,6 +68,7 @@ export default function ImportPage() {
     setDrafts(seedDrafts(payload.rows));
     setTotal(payload.total);
     setPage(payload.page);
+    setVersions(payload.versions || []);
   }
 
   async function loadBatch(batchId, nextPage, nextFilter) {
@@ -92,6 +105,9 @@ export default function ImportPage() {
       }
       setMessage(`${result.total} rows staged from ${result.fileName}. Nothing is saved to students until you commit.`);
       await loadBatch(result.batchId, 1, result.invalid > 0 ? "invalid" : "all");
+      const historyResponse = await fetch("/api/imports");
+      const historyResult = await historyResponse.json();
+      if (historyResponse.ok) setHistory(historyResult.batches || []);
     } finally {
       setBusy(false);
     }
@@ -140,10 +156,10 @@ export default function ImportPage() {
         return;
       }
       setMessage(`${result.imported} students imported. ${result.skipped} invalid rows were skipped.`);
-      setBatch(null);
-      setRows([]);
-      setDrafts({});
-      setTotal(0);
+      await loadBatch(batch.id, 1, "all");
+      const historyResponse = await fetch("/api/imports");
+      const historyResult = await historyResponse.json();
+      if (historyResponse.ok) setHistory(historyResult.batches || []);
     } finally {
       setBusy(false);
     }
@@ -180,6 +196,16 @@ export default function ImportPage() {
         {message && <div className="import-message">{message}</div>}
         {error && <div className="import-message import-error">{error}</div>}
 
+        <section className="import-history panel">
+          <div className="panel-heading"><div><p className="eyebrow">Saved imports</p><h2>Recent batches</h2></div></div>
+          {history.length === 0 ? <p className="empty-inline">No imports yet.</p> : history.map((item) => (
+            <div className="import-history-row" key={item.id}>
+              <span><strong>{item.fileName}</strong><small>{item.status} · {item.totalRows} rows · {item.createdAt ? new Date(item.createdAt).toLocaleString() : ""}</small></span>
+              <button type="button" onClick={() => loadBatch(item.id, 1, "all")} disabled={busy}>Open</button>
+            </div>
+          ))}
+        </section>
+
         {batch && (
           <section className="import-preview panel">
             <div className="panel-heading">
@@ -196,6 +222,16 @@ export default function ImportPage() {
                 <button type="button" className={filter === "invalid" ? "active" : ""} onClick={() => loadBatch(batch.id, 1, "invalid")} disabled={busy}>Needs attention ({batch.invalidRows})</button>
               </div>
               <span className="preview-note">Fix any value in place, then save. Invalid rows are left out of the commit.</span>
+            </div>
+            <div className="import-downloads">
+              <a href={`/api/imports/${batch.id}/download?source=original`}>Download original file</a>
+              {versions.map((version) => (
+                <span key={version.version_no}>
+                  Version {version.version_no}:
+                  {" "}<a href={`/api/imports/${batch.id}/download?version=${version.version_no}&format=xlsx`}>XLSX</a>
+                  {" "}<a href={`/api/imports/${batch.id}/download?version=${version.version_no}&format=csv`}>CSV</a>
+                </span>
+              ))}
             </div>
 
             {rows.length === 0 ? (
@@ -216,7 +252,7 @@ export default function ImportPage() {
                     {rows.map((row) => {
                       const draft = drafts[row.id] || {};
                       const dirty = isDirty(row, draft);
-                      const locked = batch.status === "completed";
+                      const locked = batch.status !== "preview";
                       return (
                         <tr key={row.id} className={dirty ? "dirty-row" : row.status === "invalid" ? "invalid-row" : ""}>
                           <td className="review-row-number">{row.rowNumber}</td>
@@ -233,7 +269,7 @@ export default function ImportPage() {
                           ))}
                           <td>
                             <span className={`review-status ${row.status === "invalid" ? "invalid" : "valid"}`}>
-                              {row.status === "invalid" ? "Invalid" : row.status === "committed" ? "Imported" : "Ready"}
+                              {row.status === "invalid" ? "Invalid" : row.status === "committed" ? "Imported" : row.status === "skipped" ? "Skipped" : "Ready"}
                             </span>
                             {row.errors.length > 0 && <div className="review-errors">{row.errors.join(", ")}</div>}
                           </td>
@@ -255,8 +291,8 @@ export default function ImportPage() {
                 <button className="button" type="button" onClick={saveChanges} disabled={busy || dirtyRows.length === 0}>
                   Save {dirtyRows.length > 0 ? `${dirtyRows.length} change${dirtyRows.length === 1 ? "" : "s"}` : "changes"}
                 </button>
-                <button className="button button-primary" type="button" onClick={commit} disabled={busy || batch.validRows === 0 || dirtyRows.length > 0}>
-                  Commit {batch.validRows} valid students
+                <button className="button button-primary" type="button" onClick={commit} disabled={busy || batch.status !== "preview" || batch.validRows === 0 || dirtyRows.length > 0}>
+                  {batch.status === "completed" ? "Import completed" : `Commit ${batch.validRows} valid students`}
                 </button>
               </div>
             </div>

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { ImportError, commitImportBatch, getImportBatch, listImportRows, updateImportRows } from "@/lib/imports";
+import { ImportError, commitImportBatch, getImportBatch, listImportRows, listImportVersions, updateImportRows } from "@/lib/imports";
 import { getSession } from "@/lib/auth";
 import { recordAuditLog } from "@/lib/audit";
 
@@ -17,7 +17,8 @@ async function loadBatch(session, batchId, { page, pageSize, filter }) {
   const batch = await getImportBatch(batchId, session.school_id);
   if (!batch) return null;
   const list = await listImportRows(batchId, session.school_id, { page, pageSize, filter });
-  return { batch, ...list };
+  const versions = await listImportVersions(batchId, session.school_id);
+  return { batch, versions, ...list };
 }
 
 function failure(error, fallback) {
@@ -56,7 +57,7 @@ export async function PATCH(request, { params }) {
 
   try {
     const body = await request.json();
-    await updateImportRows(batchId, session.school_id, body?.rows);
+    await updateImportRows(batchId, session.school_id, body?.rows, session.id);
     const search = new URL(request.url).searchParams;
     const payload = await loadBatch(session, batchId, {
       page: body?.page ?? search.get("page"),

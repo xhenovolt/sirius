@@ -1,6 +1,6 @@
-import { randomBytes } from "node:crypto";
-import { getDb } from "./db.js";
-import { assertTenantId, queryTenant, queryTenantOne } from "./dbTenant.js";
+import { createHash, randomBytes } from "node:crypto";
+import { gunzipSync, gzipSync } from "node:zlib";
+import { assertTenantId, queryTenant, queryTenantOne, withTenantTransaction } from "./dbTenant.js";
 import { checkCapacity } from "./entitlements.js";
 
 const requiredFields = ["student_account_no", "first_name", "last_name"];
@@ -124,8 +124,11 @@ function shapeRow(row) {
  * Puts parsed spreadsheet rows into import_rows staging. Nothing here touches
  * students; the only writer of student data is commitImportBatch.
  */
-export async function stageImport({ fileName, rows, schoolId }) {
+export async function stageImport({ fileName, rows, schoolId, sourceFile, contentType, createdBy = null }) {
   assertTenantId(schoolId);
+  if (!Buffer.isBuffer(sourceFile) || sourceFile.length === 0) {
+    throw new ImportError("The original spreadsheet file is required.");
+  }
   if (!Array.isArray(rows) || rows.length === 0) throw new ImportError("The spreadsheet did not contain any student rows.");
   if (rows.length > maxImportRows) throw new ImportError(`This file has ${rows.length} rows. Import at most ${maxImportRows} rows at a time.`);
 
@@ -137,15 +140,25 @@ export async function stageImport({ fileName, rows, schoolId }) {
   });
   const valid = staged.filter((row) => row.status === "valid").length;
 
-  const connection = await getDb().getConnection();
-  try {
-    await connection.beginTransaction();
-    const [batch] = await connection.query(
+  return withTenantTransaction(schoolId, async (scoped) => {
+    const [batch] = await scoped.query(
       `INSERT INTO import_batches (school_id, file_name, total_rows, valid_rows, invalid_rows, status)
        VALUES (?, ?, ?, ?, ?, 'preview')`,
       [schoolId, clean(fileName).slice(0, 255) || "import", staged.length, valid, staged.length - valid],
     );
     const batchId = batch.insertId;
+    await scoped.query(
+      `INSERT INTO import_batch_files (school_id, batch_id, file_name, content_type, sha256, file_data)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [
+        schoolId,
+        batchId,
+        clean(fileName).slice(0, 255) || "import",
+        clean(contentType).slice(0, 100) || "application/octet-stream",
+        createHash("sha256").update(sourceFile).digest("hex"),
+        sourceFile,
+      ],
+    );
 
     const values = staged.map((row) => [
       schoolId,
@@ -159,26 +172,76 @@ export async function stageImport({ fileName, rows, schoolId }) {
       row.status,
     ]);
     for (let index = 0; index < values.length; index += insertChunkSize) {
-      await connection.query(
+      await scoped.query(
         "INSERT INTO import_rows (school_id, batch_id, `row_number`, student_account_no, full_name, extracted, errors, photo_ref, status) VALUES ?",
         [values.slice(index, index + insertChunkSize)],
       );
     }
 
-    await connection.commit();
+    await saveBatchVersion(scoped, batchId, schoolId, 1, createdBy);
     return { batchId, fileName, total: staged.length, valid, invalid: staged.length - valid };
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
+  });
+}
+
+async function saveBatchVersion(scoped, batchId, schoolId, versionNo, createdBy) {
+  const [rows] = await scoped.query(
+    `SELECT id, \`row_number\`, student_account_no, full_name, extracted, errors, status
+       FROM import_rows
+      WHERE batch_id = ? AND school_id = ?
+      ORDER BY \`row_number\``,
+    [batchId, schoolId],
+  );
+  const snapshot = gzipSync(Buffer.from(JSON.stringify(rows)));
+  await scoped.query(
+    `INSERT INTO import_batch_versions (school_id, batch_id, version_no, snapshot, created_by)
+     VALUES (?, ?, ?, ?, ?)`,
+    [schoolId, batchId, versionNo, snapshot, createdBy],
+  );
+  await scoped.query(
+    "UPDATE import_batches SET current_version = ? WHERE id = ? AND school_id = ?",
+    [versionNo, batchId, schoolId],
+  );
+}
+
+export async function listImportVersions(batchId, schoolId) {
+  const [rows] = await queryTenant(
+    schoolId,
+    `SELECT version_no, created_by, created_at
+       FROM import_batch_versions
+      WHERE batch_id = ? AND school_id = ?
+      ORDER BY version_no DESC`,
+    [batchId, schoolId],
+  );
+  return rows;
+}
+
+export async function getImportVersionRows(batchId, schoolId, versionNo) {
+  const version = await queryTenantOne(
+    schoolId,
+    `SELECT snapshot FROM import_batch_versions
+      WHERE batch_id = ? AND school_id = ? AND version_no = ?
+      LIMIT 1`,
+    [batchId, schoolId, versionNo],
+  );
+  if (!version) return null;
+  return JSON.parse(gunzipSync(version.snapshot).toString("utf8"));
+}
+
+export async function getImportSourceFile(batchId, schoolId) {
+  return queryTenantOne(
+    schoolId,
+    `SELECT file_name, content_type, sha256, file_data
+       FROM import_batch_files
+      WHERE batch_id = ? AND school_id = ?
+      LIMIT 1`,
+    [batchId, schoolId],
+  );
 }
 
 export async function getImportBatch(batchId, schoolId) {
   const batch = await queryTenantOne(
     schoolId,
-    `SELECT id, school_id, file_name, total_rows, valid_rows, invalid_rows, imported_rows, status, error_message, created_at, completed_at
+    `SELECT id, school_id, file_name, total_rows, valid_rows, invalid_rows, imported_rows, current_version, status, error_message, created_at, completed_at
      FROM import_batches WHERE id = ? AND school_id = ? LIMIT 1`,
     [batchId, schoolId],
   );
@@ -192,10 +255,36 @@ export async function getImportBatch(batchId, schoolId) {
     invalidRows: batch.invalid_rows,
     importedRows: batch.imported_rows,
     status: batch.status,
+    currentVersion: Number(batch.current_version || 1),
     errorMessage: batch.error_message,
     createdAt: batch.created_at,
     completedAt: batch.completed_at,
   };
+}
+
+export async function listImportBatches(schoolId) {
+  const [rows] = await queryTenant(
+    schoolId,
+    `SELECT id, file_name, total_rows, valid_rows, invalid_rows, imported_rows,
+            current_version, status, created_at, completed_at
+       FROM import_batches
+      WHERE school_id = ?
+      ORDER BY created_at DESC
+      LIMIT 50`,
+    [schoolId],
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    fileName: row.file_name,
+    totalRows: row.total_rows,
+    validRows: row.valid_rows,
+    invalidRows: row.invalid_rows,
+    importedRows: row.imported_rows,
+    currentVersion: Number(row.current_version || 1),
+    status: row.status,
+    createdAt: row.created_at,
+    completedAt: row.completed_at,
+  }));
 }
 
 export async function listImportRows(batchId, schoolId, { page = 1, pageSize = defaultPageSize, filter = "all" } = {}) {
@@ -256,20 +345,18 @@ async function revalidateBatch(executor, batchId, schoolId) {
 }
 
 /** Applies reviewed corrections to staged rows, then revalidates the batch. */
-export async function updateImportRows(batchId, schoolId, updates) {
+export async function updateImportRows(batchId, schoolId, updates, createdBy = null) {
   assertTenantId(schoolId);
   if (!Array.isArray(updates) || updates.length === 0) throw new ImportError("No row changes were provided.");
   if (updates.length > maxPageSize) throw new ImportError(`Save at most ${maxPageSize} rows at a time.`);
 
-  const connection = await getDb().getConnection();
-  try {
-    await connection.beginTransaction();
-    const [batchRows] = await connection.query("SELECT id, status FROM import_batches WHERE id = ? AND school_id = ? FOR UPDATE", [batchId, schoolId]);
+  return withTenantTransaction(schoolId, async (scoped) => {
+    const [batchRows] = await scoped.query("SELECT id, status, current_version FROM import_batches WHERE id = ? AND school_id = ? FOR UPDATE", [batchId, schoolId]);
     const batch = batchRows[0];
     if (!batch) throw new ImportError("Import batch not found.", 404);
     if (batch.status === "completed") throw new ImportError("This import has already been committed.", 409);
 
-    const [stagedRows] = await connection.query(
+    const [stagedRows] = await scoped.query(
       "SELECT id FROM import_rows WHERE batch_id = ? AND school_id = ? AND status IN ('pending', 'valid', 'invalid')",
       [batchId, schoolId],
     );
@@ -279,22 +366,17 @@ export async function updateImportRows(batchId, schoolId, updates) {
       const id = Number(update?.id);
       if (!Number.isInteger(id) || !editable.has(id)) throw new ImportError("A reviewed row is no longer part of this import. Reload the page and try again.", 409);
       const data = normalizeRow(update);
-      await connection.query(
+      await scoped.query(
         `UPDATE import_rows SET extracted = ?, student_account_no = ?, full_name = ?, photo_ref = ?
          WHERE id = ? AND batch_id = ? AND school_id = ?`,
         [toJson(data), data.student_account_no || null, `${data.first_name} ${data.last_name}`.trim() || null, data.photo_url || null, id, batchId, schoolId],
       );
     }
 
-    const summary = await revalidateBatch(connection, batchId, schoolId);
-    await connection.commit();
+    const summary = await revalidateBatch(scoped, batchId, schoolId);
+    await saveBatchVersion(scoped, batchId, schoolId, Number(batch.current_version) + 1, createdBy);
     return summary;
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
+  });
 }
 
 function makeUid() {
@@ -319,10 +401,8 @@ const upsertStudentSql = `
  */
 export async function commitImportBatch(batchId, schoolId) {
   assertTenantId(schoolId);
-  const connection = await getDb().getConnection();
-  try {
-    await connection.beginTransaction();
-    const [batchRows] = await connection.query(
+  return withTenantTransaction(schoolId, async (scoped) => {
+    const [batchRows] = await scoped.query(
       "SELECT id, status FROM import_batches WHERE id = ? AND school_id = ? FOR UPDATE",
       [batchId, schoolId],
     );
@@ -330,20 +410,20 @@ export async function commitImportBatch(batchId, schoolId) {
     if (!batch) throw new ImportError("Import batch not found.", 404);
     if (batch.status === "completed") throw new ImportError("This import has already been committed.", 409);
 
-    const summary = await revalidateBatch(connection, batchId, schoolId);
+    const summary = await revalidateBatch(scoped, batchId, schoolId);
     if (summary.valid === 0) throw new ImportError("There are no valid rows to import. Correct the flagged rows first.");
 
-    const [stagedRows] = await connection.query(
+    const [stagedRows] = await scoped.query(
       "SELECT id, extracted FROM import_rows WHERE batch_id = ? AND school_id = ? AND status = 'valid' ORDER BY `row_number`",
       [batchId, schoolId],
     );
     const rows = stagedRows.map((row) => ({ id: row.id, extracted: normalizeRow(fromJson(row.extracted) || {}) }));
-    const [[school]] = await connection.query("SELECT school_name FROM schools WHERE school_id = ? LIMIT 1", [schoolId]);
+    const [[school]] = await scoped.query("SELECT school_name FROM schools WHERE school_id = ? LIMIT 1", [schoolId]);
 
     const accountNumbers = rows.map((row) => row.extracted.student_account_no);
     const existing = new Map();
     for (let index = 0; index < accountNumbers.length; index += insertChunkSize) {
-      const [found] = await connection.query(
+      const [found] = await scoped.query(
         "SELECT id, student_account_no FROM students WHERE school_id = ? AND student_account_no IN (?)",
         [schoolId, accountNumbers.slice(index, index + insertChunkSize)],
       );
@@ -364,7 +444,7 @@ export async function commitImportBatch(batchId, schoolId) {
     let imported = 0;
     for (const row of rows) {
       const student = row.extracted;
-      const [result] = await connection.query(upsertStudentSql, [
+      const [result] = await scoped.query(upsertStudentSql, [
         schoolId,
         makeUid(),
         student.student_account_no,
@@ -382,21 +462,15 @@ export async function commitImportBatch(batchId, schoolId) {
         batchId,
       ]);
       const studentId = existing.get(student.student_account_no.toLowerCase()) ?? result.insertId;
-      await connection.query("UPDATE import_rows SET student_id = ?, status = 'committed' WHERE id = ? AND school_id = ?", [studentId, row.id, schoolId]);
+      await scoped.query("UPDATE import_rows SET student_id = ?, status = 'committed' WHERE id = ? AND school_id = ?", [studentId, row.id, schoolId]);
       imported += 1;
     }
 
-    await connection.query("UPDATE import_rows SET status = 'skipped' WHERE batch_id = ? AND school_id = ? AND status = 'invalid'", [batchId, schoolId]);
-    await connection.query(
+    await scoped.query("UPDATE import_rows SET status = 'skipped' WHERE batch_id = ? AND school_id = ? AND status = 'invalid'", [batchId, schoolId]);
+    await scoped.query(
       "UPDATE import_batches SET imported_rows = ?, invalid_rows = ?, status = 'completed', completed_at = CURRENT_TIMESTAMP WHERE id = ? AND school_id = ?",
       [imported, summary.invalid, batchId, schoolId],
     );
-    await connection.commit();
     return { batchId, imported, skipped: summary.invalid };
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
+  });
 }
