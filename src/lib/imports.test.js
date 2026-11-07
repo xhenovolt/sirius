@@ -41,6 +41,17 @@ test("normalizeRow prefers the first alias that carries a value", () => {
   assert.equal(row.student_account_no, "A-2");
 });
 
+test("normalizeRow uses the confirmed mapping instead of guessing aliases", () => {
+  const row = normalizeRow(
+    { "Learner ID": "A-3", "Given name": "Amina", "First Name": "Ignored", "Family name": "Njoroge" },
+    { student_account_no: "Learner ID", first_name: "Given name", last_name: "Family name" },
+  );
+
+  assert.equal(row.student_account_no, "A-3");
+  assert.equal(row.first_name, "Amina");
+  assert.equal(row.last_name, "Njoroge");
+});
+
 test("validateRow requires the natural key and both names", () => {
   assert.deepEqual(validateRow({ student_account_no: "", first_name: "", last_name: "" }), [
     "student account number is required",

@@ -425,3 +425,34 @@ remediation commits were made as part of this audit.
   user-confirmed mapping, and saved school templates.
 - Step 2's real-database isolation suite and all new migration verification
   remain outstanding because no disposable TiDB database is configured.
+
+## 2026-11-07 — Step 5d deterministic import mapping
+
+### Done
+
+- Added deterministic header normalization, known-synonym and fuzzy matching,
+  limited data-shape hints, confidence/reason reporting, and validation that
+  required fields are mapped to distinct source columns.
+- Import now analyzes an uploaded spreadsheet before staging. The review UI
+  allows users to confirm/edit field mappings, apply a saved school template,
+  and save the current mapping as a school-specific template. Empty files and
+  malformed template JSON are rejected explicitly.
+- Staging applies only the confirmed mapping. Student data remains unchanged
+  until the existing import review/commit process.
+- Added unit tests for synonym matching, fuzzy and data-shape suggestions,
+  required fields, and duplicate source-column rejection.
+
+### Verification
+
+- `npm.cmd test`: passed, 32 tests.
+- `npm.cmd run build`: passed; the import mapping screen and APIs compiled.
+- `node --check` on changed import modules/routes and `git diff --check`:
+  passed.
+- Migration 010 and template persistence were not exercised against TiDB; the
+  migration remains unapplied because no disposable test database is configured.
+
+### Next / known issues
+
+- Continue remaining Step 5 coverage and verify migrations/import transactions
+  against a dedicated test database before claiming live database validation.
+- The Step 2 real-database tenant isolation suite remains outstanding.

@@ -6,16 +6,16 @@ import { checkCapacity } from "./entitlements.js";
 const requiredFields = ["student_account_no", "first_name", "last_name"];
 
 // Accepted spreadsheet header spellings per student column.
-const fieldAliases = {
-  student_account_no: ["student_account_no", "student account no", "student account number", "admission_number", "admission", "admission number", "Admission Number"],
-  first_name: ["first_name", "firstName", "first name", "First Name"],
-  last_name: ["last_name", "lastName", "last name", "Last Name"],
-  gender: ["gender", "Gender"],
-  class_name: ["class_name", "class", "class name", "Class"],
-  stream: ["stream", "Stream"],
-  photo_url: ["photo_url", "photo", "photo url", "Photo"],
-  parent_name: ["parent_name", "parent", "parent name", "Parent Name"],
-  parent_phone: ["parent_phone", "parentPhone", "parent phone", "Parent Phone"],
+export const fieldAliases = {
+  student_account_no: ["student_account_no", "student account no", "student account number", "student number", "learner number", "registration number", "registration no", "admission_number", "admission", "admission number", "Admission Number"],
+  first_name: ["first_name", "firstName", "first name", "given name", "given_name", "First Name"],
+  last_name: ["last_name", "lastName", "last name", "surname", "family name", "family_name", "Last Name"],
+  gender: ["gender", "sex", "Gender"],
+  class_name: ["class_name", "class", "class name", "grade", "year level", "Class"],
+  stream: ["stream", "section", "house", "Stream"],
+  photo_url: ["photo_url", "photo", "photo url", "profile photo", "image url", "Photo"],
+  parent_name: ["parent_name", "parent", "parent name", "guardian name", "Parent Name"],
+  parent_phone: ["parent_phone", "parentPhone", "parent phone", "guardian phone", "contact number", "Parent Phone"],
 };
 
 // Mirrors the column widths in database/schema.sql so an oversized value is
@@ -66,15 +66,19 @@ function fromJson(value) {
 }
 
 /** Maps one spreadsheet row onto student columns, honouring known header aliases. */
-export function normalizeRow(row) {
+export function normalizeRow(row, mapping) {
   const normalized = {};
   for (const field of Object.keys(fieldAliases)) {
     let value = "";
-    for (const alias of fieldAliases[field]) {
-      const candidate = clean(row?.[alias]);
-      if (candidate) {
-        value = candidate;
-        break;
+    if (mapping && Object.hasOwn(mapping, field)) {
+      value = mapping[field] ? clean(row?.[mapping[field]]) : "";
+    } else {
+      for (const alias of fieldAliases[field]) {
+        const candidate = clean(row?.[alias]);
+        if (candidate) {
+          value = candidate;
+          break;
+        }
       }
     }
     normalized[field] = value;
@@ -173,7 +177,7 @@ export function shapeImportRow(row) {
  * Puts parsed spreadsheet rows into import_rows staging. Nothing here touches
  * students; the only writer of student data is commitImportBatch.
  */
-export async function stageImport({ fileName, rows, schoolId, sourceFile, contentType, createdBy = null }) {
+export async function stageImport({ fileName, rows, schoolId, sourceFile, contentType, mapping, createdBy = null }) {
   assertTenantId(schoolId);
   if (!Buffer.isBuffer(sourceFile) || sourceFile.length === 0) {
     throw new ImportError("The original spreadsheet file is required.");
@@ -181,7 +185,7 @@ export async function stageImport({ fileName, rows, schoolId, sourceFile, conten
   if (!Array.isArray(rows) || rows.length === 0) throw new ImportError("The spreadsheet did not contain any student rows.");
   if (rows.length > maxImportRows) throw new ImportError(`This file has ${rows.length} rows. Import at most ${maxImportRows} rows at a time.`);
 
-  const extracted = rows.map(normalizeRow);
+  const extracted = rows.map((row) => normalizeRow(row, mapping));
   const duplicates = duplicateAccountNumbersFrom(extracted.map((row) => row.student_account_no));
   const staged = extracted.map((data, index) => {
     const errors = validateRow(data, duplicates);
@@ -334,6 +338,53 @@ export async function listImportBatches(schoolId) {
     createdAt: row.created_at,
     completedAt: row.completed_at,
   }));
+}
+
+export async function listImportMappingTemplates(schoolId) {
+  const [rows] = await queryTenant(
+    schoolId,
+    `SELECT id, template_name, mapping, updated_at
+       FROM import_mapping_templates
+      WHERE school_id = ?
+      ORDER BY template_name ASC`,
+    [schoolId],
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.template_name,
+    mapping: fromJson(row.mapping) || {},
+    updatedAt: row.updated_at,
+  }));
+}
+
+export async function saveImportMappingTemplate(schoolId, name, mapping, createdBy) {
+  assertTenantId(schoolId);
+  const templateName = clean(name);
+  if (!templateName || templateName.length > 100) {
+    throw new ImportError("Mapping template name must be between 1 and 100 characters.");
+  }
+  if (!mapping || typeof mapping !== "object" || Array.isArray(mapping)) {
+    throw new ImportError("A valid column mapping is required.");
+  }
+  const allowedFields = new Set(Object.keys(fieldAliases));
+  const values = Object.entries(mapping);
+  if (values.some(([field, header]) => !allowedFields.has(field) || typeof header !== "string")) {
+    throw new ImportError("The mapping contains an unsupported field or source column.");
+  }
+  if (new Set(values.map(([, header]) => header).filter(Boolean)).size !== values.filter(([, header]) => header).length) {
+    throw new ImportError("A source column can only be mapped once.");
+  }
+  if (requiredFields.some((field) => !mapping[field])) {
+    throw new ImportError("Student account number, first name, and last name must be mapped.");
+  }
+  await queryTenant(
+    schoolId,
+    `INSERT INTO import_mapping_templates (school_id, template_name, mapping, created_by)
+     VALUES (?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE mapping = VALUES(mapping), created_by = VALUES(created_by),
+                             updated_at = CURRENT_TIMESTAMP`,
+    [schoolId, templateName, toJson(mapping), createdBy || null],
+  );
 }
 
 export async function listImportRows(batchId, schoolId, { page = 1, pageSize = defaultPageSize, filter = "all" } = {}) {

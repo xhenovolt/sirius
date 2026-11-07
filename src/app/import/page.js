@@ -15,8 +15,16 @@ const editableFields = [
   { key: "parent_name", label: "Parent name" },
   { key: "parent_phone", label: "Parent phone" },
 ];
+const requiredMappingFields = ["student_account_no", "first_name", "last_name"];
 
 const pageSize = 50;
+
+async function fetchImportHistory() {
+  const response = await fetch("/api/imports");
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || "Unable to load import history.");
+  return result;
+}
 
 function seedDrafts(rows) {
   const drafts = {};
@@ -60,6 +68,11 @@ export default function ImportPage() {
   const [total, setTotal] = useState(0);
   const [versions, setVersions] = useState([]);
   const [history, setHistory] = useState([]);
+  const [templates, setTemplates] = useState([]);
+  const [analysis, setAnalysis] = useState(null);
+  const [pendingFile, setPendingFile] = useState(null);
+  const [mapping, setMapping] = useState({});
+  const [templateName, setTemplateName] = useState("");
   const [filter, setFilter] = useState("all");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -69,11 +82,10 @@ export default function ImportPage() {
     fetch("/api/auth/session").then((response) => {
       if (response.status === 401) window.location.href = "/login";
     });
-    fetch("/api/imports")
-      .then(async (response) => {
-        const result = await response.json();
-        if (!response.ok) throw new Error(result.error || "Unable to load import history.");
+    fetchImportHistory()
+      .then((result) => {
         setHistory(result.batches || []);
+        setTemplates(result.templates || []);
       })
       .catch((requestError) => {
         console.error("Import history request failed", requestError);
@@ -110,6 +122,9 @@ export default function ImportPage() {
     setBusy(true);
     setError("");
     setMessage("");
+    setAnalysis(null);
+    setPendingFile(null);
+    setMapping({});
     setBatch(null);
     setRows([]);
     setDrafts({});
@@ -117,20 +132,88 @@ export default function ImportPage() {
     try {
       const formData = new FormData();
       formData.append("file", file);
+      formData.append("mode", "analyze");
       const response = await fetch("/api/imports", { method: "POST", body: formData });
       const result = await response.json();
       if (!response.ok) {
         setError(result.error);
         return;
       }
-      setMessage(`${result.total} rows staged from ${result.fileName}. Nothing is saved to students until you commit.`);
-      await loadBatch(result.batchId, 1, result.invalid > 0 ? "invalid" : "all");
-      const historyResponse = await fetch("/api/imports");
-      const historyResult = await historyResponse.json();
-      if (historyResponse.ok) setHistory(historyResult.batches || []);
+      setAnalysis(result);
+      setPendingFile(file);
+      setMapping(Object.fromEntries(Object.entries(result.suggestions).map(([field, suggestion]) => [field, suggestion.header])));
+      setMessage(`Review the suggested column mapping for ${result.fileName} before staging any rows.`);
+    } catch (requestError) {
+      console.error("Spreadsheet analysis failed", requestError);
+      setError("Unable to analyze the spreadsheet. Check the file and try again.");
     } finally {
       setBusy(false);
     }
+  }
+
+  async function stageMappedFile() {
+    if (!pendingFile || !analysis) return;
+    setBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      const formData = new FormData();
+      formData.append("file", pendingFile);
+      formData.append("mode", "stage");
+      formData.append("mapping", JSON.stringify(mapping));
+      const response = await fetch("/api/imports", { method: "POST", body: formData });
+      const result = await response.json();
+      if (!response.ok) {
+        setError(result.error || "Unable to stage the spreadsheet.");
+        return;
+      }
+      setAnalysis(null);
+      setPendingFile(null);
+      setMessage(`${result.total} rows staged from ${result.fileName}. Nothing is saved to students until you commit.`);
+      await loadBatch(result.batchId, 1, result.invalid > 0 ? "invalid" : "all");
+      const historyResult = await fetchImportHistory();
+      setHistory(historyResult.batches || []);
+      setTemplates(historyResult.templates || []);
+    } catch (requestError) {
+      console.error("Spreadsheet staging failed", requestError);
+      setError("Unable to stage the spreadsheet. Check your connection and try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveTemplate() {
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch("/api/imports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "save-template", name: templateName, mapping }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        setError(result.error || "Unable to save the mapping template.");
+        return;
+      }
+      setTemplates(result.templates || []);
+      setMessage(`Mapping template "${templateName.trim()}" saved for this school.`);
+      setTemplateName("");
+    } catch (requestError) {
+      console.error("Mapping template save failed", requestError);
+      setError("Unable to save the mapping template. Check your connection and try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function applyTemplate(templateId) {
+    const template = templates.find((item) => String(item.id) === templateId);
+    if (!template || !analysis) return;
+    setMapping(Object.fromEntries(editableFields.map(({ key }) => [
+      key,
+      analysis.headers.includes(template.mapping[key]) ? template.mapping[key] : "",
+    ])));
   }
 
   function editRow(rowId, key, value) {
@@ -281,6 +364,47 @@ export default function ImportPage() {
 
         {message && <div className="import-message">{message}</div>}
         {error && <div className="import-message import-error">{error}</div>}
+
+        {analysis && (
+          <section className="mapping-review panel">
+            <div className="panel-heading">
+              <div><p className="eyebrow">Confirm deterministic suggestions</p><h2>{analysis.fileName}</h2></div>
+              <span className="preview-count">{analysis.headers.length} columns found</span>
+            </div>
+            {templates.length > 0 && (
+              <label className="mapping-template-select">
+                Use a saved school mapping
+                <select defaultValue="" onChange={(event) => applyTemplate(event.target.value)} disabled={busy}>
+                  <option value="">Choose template</option>
+                  {templates.map((template) => <option value={template.id} key={template.id}>{template.name}</option>)}
+                </select>
+              </label>
+            )}
+            <div className="mapping-table">
+              {editableFields.map(({ key, label }) => {
+                const suggestion = analysis.suggestions[key];
+                const selectedElsewhere = new Set(Object.entries(mapping).filter(([field]) => field !== key).map(([, header]) => header));
+                return (
+                  <label className="mapping-row" key={key}>
+                    <span><strong>{label}</strong><small>{suggestion.reason} · {Math.round(suggestion.confidence * 100)}% confidence</small></span>
+                    <select value={mapping[key] || ""} onChange={(event) => setMapping((current) => ({ ...current, [key]: event.target.value }))} disabled={busy}>
+                      <option value="">Not mapped</option>
+                      {analysis.headers.map((header) => <option value={header} key={header} disabled={selectedElsewhere.has(header)}>{header}</option>)}
+                    </select>
+                  </label>
+                );
+              })}
+            </div>
+            <div className="mapping-actions">
+              <label>Save as a school template<input value={templateName} onChange={(event) => setTemplateName(event.target.value)} maxLength={100} disabled={busy} /></label>
+              <button type="button" onClick={saveTemplate} disabled={busy || !templateName.trim() || requiredMappingFields.some((field) => !mapping[field])}>Save template</button>
+              <button className="button button-primary" type="button" onClick={stageMappedFile} disabled={busy || analysis.rowCount === 0 || requiredMappingFields.some((field) => !mapping[field])}>
+                {busy ? "Working..." : `Stage ${analysis.rowCount} rows`}
+              </button>
+            </div>
+            <p className="preview-note">{analysis.rowCount === 0 ? "No student data rows were found in this file." : "Low-confidence and shape-based matches require your confirmation. No student records change until you review and commit."}</p>
+          </section>
+        )}
 
         <section className="import-history panel">
           <div className="panel-heading"><div><p className="eyebrow">Saved imports</p><h2>Recent batches</h2></div></div>

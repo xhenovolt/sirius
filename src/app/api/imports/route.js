@@ -1,6 +1,13 @@
 import { NextResponse } from "next/server";
 import ExcelJS from "exceljs";
-import { ImportError, listImportBatches, stageImport } from "@/lib/imports";
+import {
+  ImportError,
+  listImportBatches,
+  listImportMappingTemplates,
+  saveImportMappingTemplate,
+  stageImport,
+} from "@/lib/imports";
+import { suggestColumnMapping, validateColumnMapping } from "@/lib/importMapping";
 import { getSession } from "@/lib/auth";
 import { recordAuditLog } from "@/lib/audit";
 
@@ -11,22 +18,32 @@ async function parseSpreadsheet(buffer, fileName) {
   if (/\.csv$/i.test(fileName)) await workbook.csv.load(buffer);
   else await workbook.xlsx.load(buffer);
   const worksheet = workbook.worksheets[0];
-  if (!worksheet) return [];
-  const headers = worksheet.getRow(1).values.slice(1).map((header) => String(header || "").trim());
+  if (!worksheet) return { headers: [], rows: [] };
+  const seenHeaders = new Map();
+  const headers = worksheet.getRow(1).values.slice(1).map((header, index) => {
+    const base = String(header || "").trim() || `Column ${index + 1}`;
+    const count = (seenHeaders.get(base) || 0) + 1;
+    seenHeaders.set(base, count);
+    return count === 1 ? base : `${base} (${count})`;
+  });
   const rows = [];
   worksheet.eachRow((row, rowNumber) => {
     if (rowNumber === 1) return;
     const values = row.values.slice(1);
     if (values.some((value) => value !== null && value !== undefined && String(value).trim() !== "")) rows.push(Object.fromEntries(headers.map((header, index) => [header, values[index] ?? ""])));
   });
-  return rows;
+  return { headers, rows };
 }
 
 export async function GET() {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
   try {
-    return NextResponse.json({ batches: await listImportBatches(session.school_id) });
+    const [batches, templates] = await Promise.all([
+      listImportBatches(session.school_id),
+      listImportMappingTemplates(session.school_id),
+    ]);
+    return NextResponse.json({ batches, templates });
   } catch (error) {
     console.error("Import history load failed", error);
     return NextResponse.json({ error: "Unable to load import history." }, { status: 500 });
@@ -44,6 +61,20 @@ export async function POST(request) {
 
   try {
     const contentType = request.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) {
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return NextResponse.json({ error: "The import request must contain valid JSON." }, { status: 400 });
+      }
+      if (!body || typeof body !== "object" || Array.isArray(body)) {
+        return NextResponse.json({ error: "The import request must be a JSON object." }, { status: 400 });
+      }
+      if (body?.action !== "save-template") return NextResponse.json({ error: "Unsupported import request." }, { status: 400 });
+      await saveImportMappingTemplate(session.school_id, body.name, body.mapping, session.id);
+      return NextResponse.json({ templates: await listImportMappingTemplates(session.school_id) });
+    }
     if (!contentType.includes("multipart/form-data")) {
       return NextResponse.json({ error: "Upload the spreadsheet as form data." }, { status: 400 });
     }
@@ -61,13 +92,30 @@ export async function POST(request) {
     }
 
     const sourceFile = Buffer.from(await file.arrayBuffer());
-    const rows = await parseSpreadsheet(sourceFile, file.name);
+    const parsed = await parseSpreadsheet(sourceFile, file.name);
+    const mode = formData.get("mode");
+    if (mode === "analyze") {
+      return NextResponse.json({
+        fileName: file.name,
+        headers: parsed.headers,
+        rowCount: parsed.rows.length,
+        suggestions: suggestColumnMapping(parsed.headers, parsed.rows.slice(0, 25)),
+      });
+    }
+    if (mode !== "stage") return NextResponse.json({ error: "Choose whether to analyze or stage the spreadsheet." }, { status: 400 });
+    let mapping;
+    try {
+      mapping = validateColumnMapping(JSON.parse(String(formData.get("mapping") || "")), parsed.headers);
+    } catch (error) {
+      throw new ImportError(error.message);
+    }
     const result = await stageImport({
       fileName: file.name,
-      rows,
+      rows: parsed.rows,
       schoolId: session.school_id,
       sourceFile,
       contentType: file.type,
+      mapping,
       createdBy: session.id,
     });
     await recordAuditLog({
