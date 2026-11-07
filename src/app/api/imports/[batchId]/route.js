@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { ImportError, commitImportBatch, getImportBatch, listImportRows, listImportVersions, updateImportRows } from "@/lib/imports";
+import { ImportError, commitImportBatch, getImportBatch, listImportRows, listImportVersions, rollbackImportBatch, updateImportRows } from "@/lib/imports";
 import { getSession } from "@/lib/auth";
 import { recordAuditLog } from "@/lib/audit";
 
@@ -91,5 +91,19 @@ export async function POST(request, { params }) {
     return NextResponse.json(result);
   } catch (error) {
     return failure(error, "Unable to commit the import.");
+  }
+}
+
+/** DELETE: roll back a completed batch if its affected students are unchanged. */
+export async function DELETE(request, { params }) {
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+  const batchId = await readBatchId(params);
+  if (!batchId) return NextResponse.json({ error: "Invalid import batch." }, { status: 400 });
+
+  try {
+    return NextResponse.json(await rollbackImportBatch(batchId, session.school_id, session, request));
+  } catch (error) {
+    return failure(error, "Unable to roll back the import.");
   }
 }

@@ -224,6 +224,33 @@ export default function ImportPage() {
     }
   }
 
+  async function rollback() {
+    if (!batch || batch.status !== "completed") return;
+    if (!window.confirm("Roll back this import? This only works if its students have not changed since the commit.")) return;
+    setBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      const response = await fetch(`/api/imports/${batch.id}`, { method: "DELETE" });
+      const result = await response.json();
+      if (!response.ok) {
+        setError(result.error || "Unable to roll back the import.");
+        return;
+      }
+      setMessage(`Import rolled back. ${result.restored} existing students restored; ${result.removed} new students removed.`);
+      await loadBatch(batch.id, 1, "all");
+      const historyResponse = await fetch("/api/imports");
+      const historyResult = await historyResponse.json();
+      if (!historyResponse.ok) throw new Error(historyResult.error || "Unable to refresh import history.");
+      setHistory(historyResult.batches || []);
+    } catch (requestError) {
+      console.error("Import rollback request failed", requestError);
+      setError("Unable to roll back the import. Check the connection and try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -378,8 +405,9 @@ export default function ImportPage() {
                   Save {dirtyRows.length > 0 ? `${dirtyRows.length} change${dirtyRows.length === 1 ? "" : "s"}` : "changes"}
                 </button>
                 <button className="button button-primary" type="button" onClick={commit} disabled={busy || batch.status !== "preview" || dirtyRows.length > 0}>
-                  {batch.status === "completed" ? "Import completed" : "Commit accepted changes"}
+                  {batch.status === "completed" ? "Import completed" : batch.status === "rolled_back" ? "Import rolled back" : "Commit accepted changes"}
                 </button>
+                {batch.status === "completed" && <button className="button" type="button" onClick={rollback} disabled={busy}>Roll back import</button>}
               </div>
             </div>
 

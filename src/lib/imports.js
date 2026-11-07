@@ -234,7 +234,7 @@ export async function stageImport({ fileName, rows, schoolId, sourceFile, conten
 
 async function saveBatchVersion(scoped, batchId, schoolId, versionNo, createdBy) {
   const [rows] = await scoped.query(
-    `SELECT id, \`row_number\`, student_account_no, full_name, extracted, errors, status, review_decisions
+    `SELECT id, \`row_number\`, student_account_no, full_name, extracted, errors, status, student_id, review_decisions
        FROM import_rows
       WHERE batch_id = ? AND school_id = ?
       ORDER BY \`row_number\``,
@@ -463,6 +463,32 @@ const insertStudentSql = `
     (school_id, student_uid, student_account_no, first_name, last_name, full_name, gender, class_name, stream, photo_url, parent_name, parent_phone, school_name, card_extra, import_batch_id)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
+const importRollbackFields = [
+  "student_account_no",
+  "first_name",
+  "last_name",
+  "full_name",
+  "gender",
+  "class_name",
+  "stream",
+  "photo_url",
+  "parent_name",
+  "parent_phone",
+  "school_name",
+  "card_extra",
+  "import_batch_id",
+  "status",
+];
+
+async function saveImportUndo(scoped, { schoolId, batchId, studentId, existedBefore, previousRecord, committedVersion }) {
+  await scoped.query(
+    `INSERT INTO import_batch_undo
+      (school_id, batch_id, student_id, existed_before, previous_record, committed_version)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [schoolId, batchId, studentId, existedBefore ? 1 : 0, previousRecord ? toJson(previousRecord) : null, committedVersion],
+  );
+}
+
 /**
  * Commits one staged batch into students in a single transaction. Rows are
  * matched on the natural key (school_id, student_account_no) so a re-import
@@ -499,7 +525,7 @@ export async function commitImportBatch(batchId, schoolId) {
       const [found] = await scoped.query(
         `SELECT id, student_account_no, first_name, last_name, full_name, gender,
                 class_name, stream, photo_url, parent_name, parent_phone, school_name,
-                card_extra, version
+                card_extra, import_batch_id, status, version
            FROM students
           WHERE school_id = ? AND student_account_no IN (?)
           FOR UPDATE`,
@@ -563,10 +589,28 @@ export async function commitImportBatch(batchId, schoolId) {
           batchId,
         ]);
         studentId = result.insertId;
+        await saveImportUndo(scoped, {
+          schoolId,
+          batchId,
+          studentId,
+          existedBefore: false,
+          previousRecord: null,
+          committedVersion: 1,
+        });
       } else {
         studentId = current.id;
+        const previousRecord = Object.fromEntries(importRollbackFields.map((field) => [field, current[field]]));
         const changes = acceptedStudentChanges(current, student, acceptedFields);
         const changedFields = Object.keys(changes).filter((field) => field !== "full_name");
+        const committedVersion = Number(current.version) + (changedFields.length > 0 ? 1 : 0);
+        await saveImportUndo(scoped, {
+          schoolId,
+          batchId,
+          studentId,
+          existedBefore: true,
+          previousRecord,
+          committedVersion,
+        });
         if (changedFields.length > 0) {
           const assignments = changedFields.map((field) => `\`${field}\` = ?`);
           const values = changedFields.map((field) => changes[field]);
@@ -594,5 +638,105 @@ export async function commitImportBatch(batchId, schoolId) {
       [imported, summary.invalid, batchId, schoolId],
     );
     return { batchId, imported, skipped };
+  });
+}
+
+export async function rollbackImportBatch(batchId, schoolId, session, request) {
+  assertTenantId(schoolId);
+  return withTenantTransaction(schoolId, async (scoped) => {
+    const [batchRows] = await scoped.query(
+      "SELECT id, status, current_version FROM import_batches WHERE id = ? AND school_id = ? FOR UPDATE",
+      [batchId, schoolId],
+    );
+    const batch = batchRows[0];
+    if (!batch) throw new ImportError("Import batch not found.", 404);
+    if (batch.status !== "completed") {
+      throw new ImportError(batch.status === "rolled_back" ? "This import has already been rolled back." : "Only a committed import can be rolled back.", 409);
+    }
+
+    const [versionRows] = await scoped.query(
+      `SELECT snapshot FROM import_batch_versions
+        WHERE batch_id = ? AND school_id = ? AND version_no = ?
+        LIMIT 1`,
+      [batchId, schoolId, batch.current_version],
+    );
+    if (!versionRows[0]) throw new ImportError("The committed import has no review snapshot; rollback is unavailable.", 409);
+    const stagedSnapshot = JSON.parse(gunzipSync(versionRows[0].snapshot).toString("utf8"));
+
+    const [undoRows] = await scoped.query(
+      `SELECT student_id, existed_before, previous_record, committed_version
+         FROM import_batch_undo
+        WHERE batch_id = ? AND school_id = ?
+        ORDER BY id`,
+      [batchId, schoolId],
+    );
+    let restored = 0;
+    let removed = 0;
+    for (const undo of undoRows) {
+      const [currentRows] = await scoped.query(
+        "SELECT version FROM students WHERE id = ? AND school_id = ? FOR UPDATE",
+        [undo.student_id, schoolId],
+      );
+      const current = currentRows[0];
+      if (!current || Number(current.version) !== Number(undo.committed_version)) {
+        throw new ImportError("A student changed after this import. Resolve those changes before rolling back.", 409);
+      }
+
+      if (undo.existed_before) {
+        const previous = fromJson(undo.previous_record);
+        if (!previous) throw new ImportError("Import rollback data is incomplete.", 409);
+        const assignments = importRollbackFields.map((field) => `\`${field}\` = ?`);
+        assignments.push("version = version + 1", "updated_at = CURRENT_TIMESTAMP");
+        await scoped.query(
+          `UPDATE students SET ${assignments.join(", ")} WHERE id = ? AND school_id = ?`,
+          [
+            ...importRollbackFields.map((field) => field === "card_extra" && previous[field] != null
+              ? toJson(previous[field])
+              : previous[field] ?? null),
+            undo.student_id,
+            schoolId,
+          ],
+        );
+        restored += 1;
+      } else {
+        const [[identity]] = await scoped.query(
+          "SELECT id FROM qr_identities WHERE student_id = ? AND school_id = ? LIMIT 1",
+          [undo.student_id, schoolId],
+        );
+        if (identity) throw new ImportError("A student from this import already has a QR identity and cannot be removed by rollback.", 409);
+        await scoped.query(
+          "DELETE FROM students WHERE id = ? AND school_id = ? AND version = ?",
+          [undo.student_id, schoolId, undo.committed_version],
+        );
+        removed += 1;
+      }
+    }
+
+    for (const row of stagedSnapshot) {
+      await scoped.query(
+        "UPDATE import_rows SET status = ?, student_id = ? WHERE id = ? AND batch_id = ? AND school_id = ?",
+        [row.status, row.student_id ?? null, row.id, batchId, schoolId],
+      );
+    }
+    await scoped.query(
+      "UPDATE import_batches SET status = 'rolled_back', imported_rows = 0 WHERE id = ? AND school_id = ?",
+      [batchId, schoolId],
+    );
+    await scoped.query(
+      `INSERT INTO audit_logs
+        (school_id, user_id, actor_email, action, entity_type, entity_id, details,
+         ip_address, user_agent)
+       VALUES (?, ?, ?, 'import.rolled_back', 'import_batch', ?, ?, ?, ?)`,
+      [
+        schoolId,
+        session?.id || null,
+        session?.email || null,
+        String(batchId),
+        toJson({ restored, removed }),
+        request?.headers?.get?.("x-real-ip") || null,
+        request?.headers?.get?.("user-agent")?.slice(0, 255) || null,
+      ],
+    );
+    return { batchId, restored, removed };
   });
 }

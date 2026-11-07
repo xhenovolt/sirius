@@ -395,3 +395,33 @@ remediation commits were made as part of this audit.
   saved school templates, plus rollback of a committed batch.
 - Step 2 real-database tenant isolation testing and migration verification
   remain blocked on a dedicated disposable TiDB database.
+
+## 2026-11-07 — Step 5c committed-batch rollback
+
+### Done
+
+- Import commit now records the pre-commit values and post-commit version for
+  each accepted student in a tenant-scoped undo table, in the same transaction
+  as the student changes.
+- Added an authenticated rollback operation that checks the student version
+  has not changed since commit. If any affected student was edited later, the
+  entire rollback aborts. Existing students are restored; newly imported
+  students are removed only if unchanged and not already issued a QR identity.
+- Rollback restores staged-row status from the latest review snapshot, marks
+  the batch rolled back, and writes its audit record atomically.
+
+### Verification
+
+- `npm.cmd test`: passed, 29 tests.
+- `npm.cmd run build`: passed; the rollback endpoint was compiled.
+- `node --check` on the changed import modules and route, and `git diff --check`:
+  passed.
+- Migration 009 and the actual rollback transaction were not run against
+  TiDB; live transactional behavior remains unverified.
+
+### Next / known issues
+
+- Step 5 remains in progress: deterministic header matching/confidence,
+  user-confirmed mapping, and saved school templates.
+- Step 2's real-database isolation suite and all new migration verification
+  remain outstanding because no disposable TiDB database is configured.

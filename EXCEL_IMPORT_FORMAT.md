@@ -50,3 +50,4 @@ The importer also recognizes these alternative headings:
 - The importer previews all rows first and imports only valid rows when confirmed.
 - Sirius assigns its internal student identifier independently of the imported student account number.
 - The uploaded source file is retained unchanged with its SHA-256 digest. Saving staged-row edits creates a downloadable version snapshot; the original and each snapshot can be exported as XLSX or CSV from import history.
+- Existing records are compared before commit. Reviewers must accept a row or choose accepted fields; rejected or unselected values are not applied. A committed batch can be rolled back only while its affected students are unchanged; rollback refuses to remove a newly imported student that already has a QR identity.
