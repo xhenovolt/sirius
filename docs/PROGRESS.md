@@ -203,3 +203,41 @@ remediation commits were made as part of this audit.
   presence views remain for Step 3.
 - Capacity checks still lack explicit tests for their fail-open policy.
 - No production database availability/schema status was verified.
+
+## 2026-11-07 — Step 2 partial; real-database gate blocked
+
+### Done
+
+- Added migration 005 to replace the global `student_uid` unique index with
+  `UNIQUE(school_id, student_uid)`. The existing natural-key constraint remains
+  `UNIQUE(school_id, admission_number)` until the planned Step 4 rename.
+- Added migration-runner pre-checks for duplicate admission numbers and
+  duplicate UIDs within a school. The runner inspects index state and safely
+  resumes the migration if DDL partially applied.
+- Added a rollback SQL file that restores the global index before removing the
+  scoped index. If a global UID collision has appeared, adding the global
+  index fails before the scoped index is dropped.
+- Added a test proving `queryTenant` rejects SQL without `school_id` before
+  calling the database executor.
+- Source inspection found no school-user import lookup by admission number
+  across schools; import matching is scoped by `school_id`.
+
+### Verification
+
+- `npm.cmd test`: passed, 21 tests / 21 passing. These tests are not a
+  substitute for cross-tenant integration coverage.
+- `npm.cmd run build`: passed.
+- `node --check scripts/migrate.mjs`: passed.
+- The migration has not been applied and no database was modified.
+
+### Blocked / next
+
+- The local `.env.local` has no dedicated `TIDB_TEST_HOST` or `TIDB_TEST_DB`;
+  only the regular database configuration is present. It is not safe to use
+  that unknown database for destructive integration fixtures.
+- Step 2 is **not complete**. The requested real-database two-school leak
+  suite across students, imports/files, audit, users, and card issuance has
+  not been written or run. The duplicate pre-check, migration, and rollback
+  have not been verified against TiDB.
+- Do not proceed to Step 3 until a disposable test database is configured and
+  the real-database leak suite passes.

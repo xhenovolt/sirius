@@ -31,7 +31,7 @@ const fakeExecutor = {
 // stay dynamic: a static import would pull the real db.js in first.
 mock.module("./db.js", { exports: { getDb: () => fakeExecutor } });
 
-const { assertTenantId, assertTenantSafe } = await import("./dbTenant.js");
+const { assertTenantId, assertTenantSafe, queryTenant } = await import("./dbTenant.js");
 const { searchStudents, getStudentByUid } = await import("./students.js");
 
 test("the tenant guard is fail-closed", () => {
@@ -39,6 +39,15 @@ test("the tenant guard is fail-closed", () => {
   assert.throws(() => assertTenantSafe("SELECT * FROM students WHERE school_id = ?", ""), /missing tenant id/);
   assert.throws(() => assertTenantId(undefined), /missing tenant id/);
   assert.doesNotThrow(() => assertTenantSafe("SELECT * FROM students WHERE school_id = ?", "sch_a"));
+});
+
+test("queryTenant rejects SQL without school_id before reaching the database", async () => {
+  calls.length = 0;
+  await assert.rejects(
+    () => queryTenant("sch_a", "SELECT * FROM students"),
+    /UNSAFE QUERY/,
+  );
+  assert.equal(calls.length, 0);
 });
 
 test("searchStudents returns only the calling school's rows", async () => {
