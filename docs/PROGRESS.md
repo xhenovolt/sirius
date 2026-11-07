@@ -605,3 +605,28 @@ remediation commits were made as part of this audit.
   database. Do not use the production-configured database for fixtures.
 - Production deployment/runtime verification and provider backup/restore
   operations are not confirmed by repository tests.
+
+## 2026-11-08 — Opt-in real-TiDB isolation harness
+
+### Done
+
+- Added `npm.cmd run test:integration`, a real-service integration runner for
+  two schools with overlapping student account numbers. It covers scoped
+  student reads/cards, duplicate prevention within a school, cross-school
+  user listing/soft-delete, import source/version/mapping access, import
+  commit/rollback, balance history, card issuance, and audit logs.
+- The runner requires `.env.test.local`, a database name ending in `_test`,
+  `_integration`, or `_ci`, and an explicit disposable-database confirmation.
+  It refuses the same host/database as `.env.local`, verifies all migrations
+  are applied, and only cleans up rows for its generated school IDs.
+- Kept this runner out of default `node --test` discovery so unit tests do not
+  require TiDB credentials.
+
+### Verification
+
+- `npm.cmd test`: passed, 51 tests.
+- `npm.cmd run build`: passed.
+- Integration runner syntax and `git diff --check`: passed.
+- `npm.cmd run test:integration` correctly stopped before connecting because
+  no `.env.test.local` test database is configured. Therefore the database
+  assertions remain unrun; this harness does not use or mutate `.env.local`.

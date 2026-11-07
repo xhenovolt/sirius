@@ -40,14 +40,25 @@ must not be treated as production-ready evidence.
 - [ ] Run a real-database two-school suite with the same
       `student_account_no` in both schools. Verify read, edit, delete, import,
       source/version download, audit, user, and card-issuance isolation.
+- [ ] Configure `.env.test.local` with a dedicated disposable TiDB using
+      `TIDB_TEST_HOST`, `TIDB_TEST_PORT`, `TIDB_TEST_USER`,
+      `TIDB_TEST_PASSWORD`, and `TIDB_TEST_DB` (which must end in `_test`,
+      `_integration`, or `_ci`), and set
+      `SIRIUS_TEST_DATABASE_CONFIRM=I_CONFIRM_THIS_IS_A_DISPOSABLE_TEST_DATABASE`.
+      The runner refuses to target the same host/database as `.env.local` and
+      only inserts/deletes uniquely named fixtures.
+- [ ] After applying migrations to that dedicated database, run
+      `npm.cmd run test:integration`. It tests two-school student and user
+      isolation, import sources/versions/mappings/commit/rollback, audit reads,
+      same-account-number tenancy, fee-history changes, and card issuance.
 - [ ] Verify a tenant query without `school_id` fails before reaching TiDB.
 - [ ] Confirm school id is derived from the authenticated school session, never
       request JSON, form data, URL parameters, or a school selector.
 - [ ] Confirm school and control-operator authentication/session cookies remain
       separate.
 - [ ] Verify user self-delete and last-admin removal/demotion protections.
-- [ ] **Unverified:** the repository's existing tenancy tests use mocks; the
-      required cross-school real-database isolation suite is still outstanding.
+- [ ] **Unverified:** the real database suite has not been run until its
+      dedicated `.env.test.local` target is provisioned and the command passes.
 
 ## Identity, clearance, and cards
 

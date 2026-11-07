@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "next start",
     "test": "node --test --experimental-test-module-mocks",
+    "test:integration": "node scripts/tenant-isolation-integration.mjs",
     "migrate": "node scripts/migrate.mjs",
     "verify:db": "node scripts/verify-db.mjs",
     "cleanup:auth": "node scripts/cleanup-auth.mjs",
