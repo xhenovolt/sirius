@@ -14,7 +14,10 @@ export default async function CardsPage() {
   let school = null;
   let databaseError = false;
   try {
-    [students, school] = await Promise.all([getStudentsForCards(session.school_id), getSchoolSettings(session.school_id)]);
+    [students, school] = await Promise.all([
+      getStudentsForCards(session.school_id),
+      getSchoolSettings(session.school_id),
+    ]);
   } catch (error) {
     console.error("Card records load failed", error);
     databaseError = true;

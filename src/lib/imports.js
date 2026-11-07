@@ -1,5 +1,6 @@
 import { getDb } from "./db.js";
 import { assertTenantId, queryTenant, queryTenantOne } from "./dbTenant.js";
+import { checkCapacity } from "./entitlements.js";
 
 const requiredFields = ["admission_number", "first_name", "last_name"];
 
@@ -348,6 +349,17 @@ export async function commitImportBatch(batchId, schoolId) {
       );
       for (const student of found) existing.set(student.admission_number.toLowerCase(), student.id);
     }
+
+    // Only genuinely NEW learners consume the plan's learner allowance — a
+    // re-import of rows the school already has is free. Counted on distinct
+    // admission numbers, since the batch may repeat one.
+    const newAdmissions = new Set();
+    for (const row of rows) {
+      const key = String(row.extracted.admission_number).toLowerCase();
+      if (!existing.has(key)) newAdmissions.add(key);
+    }
+    const over = await checkCapacity(schoolId, "learners", newAdmissions.size);
+    if (over) throw new ImportError(over.body.error, over.status);
 
     let imported = 0;
     for (const row of rows) {

@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { cookies } from "next/headers";
 import { getDb } from "./db.js";
 import { assignRole, createSchoolWithSuperAdmin, findRoleId, superAdminSlug } from "./tenancy.js";
+import { checkCapacity } from "./entitlements.js";
 
 const cookieName = "sirius_session";
 const sessionDays = 7;
@@ -115,6 +116,16 @@ function clientIp(request) {
  * from the caller's session, so a superadmin can only staff their own school.
  */
 export async function createUser({ schoolId, email, password, displayName, phone = "", roleSlug = "operator", createdBy = null }) {
+  // One choke point for the `users` meter, so no create path can skip it.
+  // A missing plan resolves to unlimited, so a brand-new school is never blocked.
+  const over = await checkCapacity(schoolId, "users");
+  if (over) {
+    const error = new Error(over.body.error);
+    error.status = over.status;
+    error.code = over.body.code;
+    error.limit = over.body.limit;
+    throw error;
+  }
   const passwordHash = await bcrypt.hash(password, 12);
   // users.role is DEPRECATED and only kept for display; authorisation reads
   // user_roles. It is an ENUM('admin','operator'), so map anything non-operator

@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { getDb } from "./db.js";
+import { checkCapacity } from "./entitlements.js";
 
 // 256 bits of entropy, comfortably above the 128-bit minimum. base64url encodes
 // 32 bytes as 43 URL-safe characters.
@@ -45,8 +46,31 @@ export async function issueIdentityWithin(executor, studentId) {
   return { id: result.insertId, student_id: studentId, public_token: publicToken, version: Number(versionRows[0].version), issued_at: null, revoked_at: null };
 }
 
-export async function issueIdentity(studentId) {
-  const connection = await getDb().getConnection();
+/** Raised when a card cannot be issued because the school's card limit is full. */
+export class IdentityError extends Error {
+  constructor(message, status = 400, code = null) {
+    super(message);
+    this.name = "IdentityError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
+export async function issueIdentity(studentId, { schoolId } = {}) {
+  const db = getDb();
+  // A card that already exists costs nothing, so only a NEW issue is metered.
+  // This is the "how many cards before you must subscribe" rule for a school on
+  // a free trial (limit = platform setting free_trial_card_limit).
+  const [active] = await db.query(
+    "SELECT 1 FROM qr_identities WHERE student_id = ? AND revoked_at IS NULL LIMIT 1",
+    [studentId],
+  );
+  if (!active.length && schoolId) {
+    const over = await checkCapacity(schoolId, "cards");
+    if (over) throw new IdentityError(over.body.error, over.status, over.body.code);
+  }
+
+  const connection = await db.getConnection();
   try {
     await connection.beginTransaction();
     const identity = await issueIdentityWithin(connection, studentId);

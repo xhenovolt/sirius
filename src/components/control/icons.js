@@ -59,3 +59,18 @@ export const X = ({ className }) => (
 export const Loader2 = ({ className }) => (
   <svg {...base} className={className}><path d="M21 12a9 9 0 1 1-6.2-8.6" /></svg>
 );
+export const Search = ({ className }) => (
+  <svg {...base} className={className}><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></svg>
+);
+export const ChevronLeft = ({ className }) => (
+  <svg {...base} className={className}><path d="M15 18l-6-6 6-6" /></svg>
+);
+export const ChevronRight = ({ className }) => (
+  <svg {...base} className={className}><path d="M9 18l6-6-6-6" /></svg>
+);
+export const Smartphone = ({ className }) => (
+  <svg {...base} className={className}><rect x="6" y="2" width="12" height="20" rx="2" /><path d="M11 18h2" /></svg>
+);
+export const CheckCircle2 = ({ className }) => (
+  <svg {...base} className={className}><circle cx="12" cy="12" r="9" /><path d="M8.5 12.5l2.5 2.5 4.5-5" /></svg>
+);

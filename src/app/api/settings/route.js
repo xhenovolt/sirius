@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createUser, requireSchoolAdmin, terminateUserSessions } from "@/lib/auth";
 import { getDb } from "@/lib/db";
+import { queryTenant } from "@/lib/dbTenant";
 import { getSchoolSettings, getUsers } from "@/lib/students";
 import { recordAuditLog } from "@/lib/audit";
 
@@ -16,7 +17,7 @@ export async function PUT(request) {
   try {
     const body = await request.json();
     if (!body.schoolName?.trim() || body.schoolName.length > 200) return NextResponse.json({ error: "School name is required." }, { status: 400 });
-    await getDb().query("UPDATE schools SET school_name = ?, school_code = ?, address = ?, contact_phone = ?, contact_email = ?, updated_at = CURRENT_TIMESTAMP WHERE school_id = ?", [body.schoolName.trim(), body.schoolCode?.trim() || null, body.address?.trim() || null, body.contactPhone?.trim() || null, body.contactEmail?.trim() || null, admin.school_id]);
+    await queryTenant(admin.school_id, "UPDATE schools SET school_name = ?, school_code = ?, address = ?, contact_phone = ?, contact_email = ?, updated_at = CURRENT_TIMESTAMP WHERE school_id = ?", [body.schoolName.trim(), body.schoolCode?.trim() || null, body.address?.trim() || null, body.contactPhone?.trim() || null, body.contactEmail?.trim() || null, admin.school_id]);
     await recordAuditLog({ session: admin, request, action: "school.settings_updated", entityType: "school", entityId: admin.school_id, details: { schoolName: body.schoolName.trim() } });
     return NextResponse.json({ school: await getSchoolSettings(admin.school_id) });
   } catch (error) { console.error("Settings update failed", error); return NextResponse.json({ error: "Unable to save school settings." }, { status: 500 }); }
@@ -56,6 +57,7 @@ export async function POST(request) {
     return NextResponse.json({ created: true }, { status: 201 });
   } catch (error) {
     console.error("Admin user creation failed", error);
+    if (error.code === "PLAN_LIMIT_REACHED") return NextResponse.json({ error: error.message, code: error.code, limit: error.limit }, { status: error.status });
     return NextResponse.json({ error: error.code === "ER_DUP_ENTRY" ? "An account with that email already exists." : "Unable to create user account." }, { status: error.code === "ER_DUP_ENTRY" ? 409 : 500 });
   }
 }

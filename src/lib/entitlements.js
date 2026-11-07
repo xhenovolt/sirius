@@ -26,7 +26,7 @@
  * SIRIUS ADAPTATION: no staff/devices tables. Meters are learners (students),
  * users and cards (qr_identities). Tenant ids are opaque strings.
  */
-import { query } from "./db.js";
+import { queryTenant } from "./dbTenant.js";
 import { getFreeTrialCardLimit } from "./control/platform-settings.js";
 
 const KNOWN_LABELS = {
@@ -71,7 +71,8 @@ export function severityFor(state) {
  * resolvable plan — see the unset-plan policy above.
  */
 export async function getPlanLimits(schoolId) {
-  const rows = await query(
+  const [rows] = await queryTenant(
+    schoolId,
     `SELECT p.limits
        FROM schools s
        JOIN subscription_plans p
@@ -80,7 +81,7 @@ export async function getPlanLimits(schoolId) {
       WHERE s.school_id = ?
       LIMIT 1`,
     [schoolId],
-  ).catch(() => []);
+  ).catch(() => [[]]);
 
   if (!rows.length) return null;
   const raw = rows[0].limits;
@@ -121,9 +122,9 @@ export const METERED_KEYS = Object.keys(COUNT_METERS);
 export async function getUsage(schoolId, key) {
   const sql = COUNT_METERS[key];
   if (!sql) return null;
-  const r = await query(sql, [schoolId]).catch(() => null);
+  const r = await queryTenant(schoolId, sql, [schoolId]).catch(() => null);
   if (r === null) return null;
-  return Number(r[0]?.n ?? 0);
+  return Number(r[0]?.[0]?.n ?? 0);
 }
 
 /**

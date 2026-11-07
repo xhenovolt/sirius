@@ -2,7 +2,7 @@
 
 /** /control/dashboard — the platform at a glance. */
 import { useEffect, useState } from "react";
-import { Loader2, School, Users, CreditCard, ShieldCheck } from "@/components/control/icons";
+import { Loader2, School, Users, CreditCard, Shield } from "@/components/control/icons";
 
 function Tile({ label, value, sub, icon: Icon }) {
   return (
@@ -41,7 +41,7 @@ export default function DashboardPage() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <Tile label="Schools" value={data.schools.total} sub={`${data.schools.active} active · ${data.schools.suspended} suspended`} icon={School} />
         <Tile label="Learners" value={data.learners} sub="active students" icon={Users} />
-        <Tile label="Clearance cards" value={data.cards} sub="issued QR identities" icon={ShieldCheck} />
+        <Tile label="Clearance cards" value={data.cards} sub="issued QR identities" icon={Shield} />
         <Tile label="Users" value={data.users} sub="active sign-ins" icon={CreditCard} />
       </div>
 

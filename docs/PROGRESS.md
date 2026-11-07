@@ -161,3 +161,45 @@ staged, or otherwise modified by the audit.
 
 Stop for approval before Step 1. No source fixes, database operations, or
 remediation commits were made as part of this audit.
+
+## 2026-11-07 — Step 1 stabilization
+
+### Done
+
+- Fixed production-build import errors: the dashboard uses the existing
+  `Shield` icon, and the school logo handler uses `requireSchoolAdmin`.
+- Restored session-scoped student/settings/card reads and passed the signed-in
+  school ID through all affected school pages. Public verification retains its
+  separate, limited-column lookup.
+- Scoped school settings and logo writes; restored the logo-update audit event.
+- Corrected the settings page's admin check to use the role-derived
+  `session.isSuperAdmin` value.
+- Removed the incomplete, unused `src/lib/schoolUsers.js` helper so the
+  lifecycle work can be completed coherently in Step 3 rather than left as a
+  misleading partial implementation.
+- Repaired the fresh-schema definition: student `school_id` has no default,
+  and `audit_logs` is again included in `database/schema.sql`.
+- Restored accidentally deleted import-review, documentation-table, and audit
+  styles in `src/app/globals.css`.
+
+### Verification
+
+- `npm.cmd test`: passed, 20 tests / 20 passing. The student test uses a mock
+  executor; identity tests use an in-memory executor; import tests cover
+  normalization/validation only. No real-database isolation test exists yet.
+- `npm.cmd run build`: passed; Next.js 16.3.4 compiled and generated the
+  production route table.
+- `git diff --check`: passed.
+- No migration or database operation was run.
+
+### Next / known issues
+
+- Step 2 remains open: global uniqueness of `student_uid`, real-DB tenant leak
+  coverage, and a stronger demonstration of the tenant guard.
+- Some tenant-table paths outside the repaired student/settings helpers still
+  use raw database access; inventory and remediation are Step 2 work.
+- User promote/demote still changes the legacy `users.role` field rather than
+  role membership; self/last-admin protection, complete lifecycle, and
+  presence views remain for Step 3.
+- Capacity checks still lack explicit tests for their fail-open policy.
+- No production database availability/schema status was verified.
