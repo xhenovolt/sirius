@@ -498,3 +498,34 @@ remediation commits were made as part of this audit.
 - Step 2's real-database tenant isolation suite and migrations 007-011 live
   verification remain outstanding. Existing printed QR cards using
   `/verify/{student_uid}` need reprinting.
+
+## 2026-11-08 — Step 7 versioned card designer
+
+### Done
+
+- Added immutable per-school card template versions. Each save increments the
+  template version under a school-scoped transaction; historical versions
+  remain selectable.
+- Added a browser designer for card title, physical dimensions, colors,
+  available fields, and field order. HTML/CSS output supports print and
+  browser “Save as PDF”.
+- The server and client share an allowlisted template schema. Fee balance,
+  arbitrary HTML/CSS, unrecognized fields, duplicate fields, and unsafe design
+  values are rejected. Card data loading does not select fee balance.
+- Template changes are restricted to school admins and audited.
+
+### Verification
+
+- `npm.cmd test`: passed, 48 tests, including template field validation and
+  immutable version creation.
+- `npm.cmd run build`: passed; the card designer and template API compiled.
+- `git diff --check`: passed.
+- Migration 012 and template persistence were not exercised against TiDB;
+  no disposable test database is configured.
+
+### Next / known issues
+
+- Step 8 hardening remains: real-database tenancy isolation, migrations and
+  transactional flows, logging, backups, and deployment checklist.
+- Migrations 007-012 are still unverified against a dedicated TiDB database;
+  previously printed UID-based QR cards still need reprinting.
