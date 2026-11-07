@@ -5,7 +5,7 @@ import Link from "next/link";
 import LogoutButton from "../LogoutButton";
 
 const editableFields = [
-  { key: "admission_number", label: "Admission no." },
+  { key: "student_account_no", label: "Student account no." },
   { key: "first_name", label: "First name" },
   { key: "last_name", label: "Last name" },
   { key: "gender", label: "Gender" },

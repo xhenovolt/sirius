@@ -1,12 +1,13 @@
+import { randomBytes } from "node:crypto";
 import { getDb } from "./db.js";
 import { assertTenantId, queryTenant, queryTenantOne } from "./dbTenant.js";
 import { checkCapacity } from "./entitlements.js";
 
-const requiredFields = ["admission_number", "first_name", "last_name"];
+const requiredFields = ["student_account_no", "first_name", "last_name"];
 
 // Accepted spreadsheet header spellings per student column.
 const fieldAliases = {
-  admission_number: ["admission_number", "admission", "admission number", "Admission Number"],
+  student_account_no: ["student_account_no", "student account no", "student account number", "admission_number", "admission", "admission number", "Admission Number"],
   first_name: ["first_name", "firstName", "first name", "First Name"],
   last_name: ["last_name", "lastName", "last name", "Last Name"],
   gender: ["gender", "Gender"],
@@ -20,7 +21,7 @@ const fieldAliases = {
 // Mirrors the column widths in database/schema.sql so an oversized value is
 // caught during review instead of failing the commit.
 const maxLengths = {
-  admission_number: 64,
+  student_account_no: 64,
   first_name: 100,
   last_name: 100,
   gender: 32,
@@ -30,6 +31,7 @@ const maxLengths = {
   parent_name: 205,
   parent_phone: 32,
 };
+const fieldLabels = { student_account_no: "student account number" };
 
 export const maxImportRows = 20000;
 export const defaultPageSize = 50;
@@ -81,22 +83,22 @@ export function normalizeRow(row) {
 }
 
 /** Returns the validation messages for one staged row. */
-export function validateRow(extracted, duplicateAdmissions = new Set()) {
+export function validateRow(extracted, duplicateAccountNumbers = new Set()) {
   const errors = requiredFields
     .filter((field) => !clean(extracted?.[field]))
-    .map((field) => `${field.replaceAll("_", " ")} is required`);
+    .map((field) => `${fieldLabels[field] || field.replaceAll("_", " ")} is required`);
 
   for (const [field, limit] of Object.entries(maxLengths)) {
-    if (clean(extracted?.[field]).length > limit) errors.push(`${field.replaceAll("_", " ")} is longer than ${limit} characters`);
+    if (clean(extracted?.[field]).length > limit) errors.push(`${fieldLabels[field] || field.replaceAll("_", " ")} is longer than ${limit} characters`);
   }
 
-  const key = clean(extracted?.admission_number).toLowerCase();
-  if (key && duplicateAdmissions.has(key)) errors.push("duplicate admission number in file");
+  const key = clean(extracted?.student_account_no).toLowerCase();
+  if (key && duplicateAccountNumbers.has(key)) errors.push("duplicate student account number in file");
 
   return errors;
 }
 
-function duplicateAdmissionsFrom(values) {
+function duplicateAccountNumbersFrom(values) {
   const counts = new Map();
   for (const value of values) {
     const key = clean(value).toLowerCase();
@@ -111,10 +113,10 @@ function shapeRow(row) {
     rowNumber: row.row_number,
     status: row.status,
     studentId: row.student_id,
-    admissionNumber: row.admission_number || "",
+    studentAccountNo: row.student_account_no || "",
     fullName: row.full_name || "",
     errors: fromJson(row.errors) || [],
-    extracted: fromJson(row.extracted) || {},
+    extracted: normalizeRow(fromJson(row.extracted) || {}),
   };
 }
 
@@ -128,7 +130,7 @@ export async function stageImport({ fileName, rows, schoolId }) {
   if (rows.length > maxImportRows) throw new ImportError(`This file has ${rows.length} rows. Import at most ${maxImportRows} rows at a time.`);
 
   const extracted = rows.map(normalizeRow);
-  const duplicates = duplicateAdmissionsFrom(extracted.map((row) => row.admission_number));
+  const duplicates = duplicateAccountNumbersFrom(extracted.map((row) => row.student_account_no));
   const staged = extracted.map((data, index) => {
     const errors = validateRow(data, duplicates);
     return { rowNumber: index + 2, data, errors, status: errors.length ? "invalid" : "valid" };
@@ -149,7 +151,7 @@ export async function stageImport({ fileName, rows, schoolId }) {
       schoolId,
       batchId,
       row.rowNumber,
-      row.data.admission_number || null,
+      row.data.student_account_no || null,
       `${row.data.first_name} ${row.data.last_name}`.trim() || null,
       toJson(row.data),
       toJson(row.errors),
@@ -158,7 +160,7 @@ export async function stageImport({ fileName, rows, schoolId }) {
     ]);
     for (let index = 0; index < values.length; index += insertChunkSize) {
       await connection.query(
-        "INSERT INTO import_rows (school_id, batch_id, `row_number`, admission_number, full_name, extracted, errors, photo_ref, status) VALUES ?",
+        "INSERT INTO import_rows (school_id, batch_id, `row_number`, student_account_no, full_name, extracted, errors, photo_ref, status) VALUES ?",
         [values.slice(index, index + insertChunkSize)],
       );
     }
@@ -209,7 +211,7 @@ export async function listImportRows(batchId, schoolId, { page = 1, pageSize = d
   const current = Math.min(Math.max(Number(page) || 1, 1), Math.max(1, Math.ceil(counts.total / size)));
   const [rows] = await queryTenant(
     schoolId,
-    `SELECT id, \`row_number\`, admission_number, full_name, extracted, errors, status, student_id
+    `SELECT id, \`row_number\`, student_account_no, full_name, extracted, errors, status, student_id
      FROM import_rows WHERE batch_id = ? AND school_id = ? ${statusFilter}
      ORDER BY \`row_number\` LIMIT ? OFFSET ?`,
     [batchId, schoolId, size, (current - 1) * size],
@@ -225,16 +227,16 @@ export async function listImportRows(batchId, schoolId, { page = 1, pageSize = d
  */
 async function revalidateBatch(executor, batchId, schoolId) {
   const [rows] = await executor.query(
-    `SELECT id, admission_number, extracted, errors, status FROM import_rows
+    `SELECT id, student_account_no, extracted, errors, status FROM import_rows
      WHERE batch_id = ? AND school_id = ? AND status IN ('pending', 'valid', 'invalid')
      ORDER BY \`row_number\``,
     [batchId, schoolId],
   );
-  const duplicates = duplicateAdmissionsFrom(rows.map((row) => row.admission_number));
+  const duplicates = duplicateAccountNumbersFrom(rows.map((row) => row.student_account_no));
   let valid = 0;
 
   for (const row of rows) {
-    const errors = validateRow(fromJson(row.extracted) || {}, duplicates);
+    const errors = validateRow(normalizeRow(fromJson(row.extracted) || {}), duplicates);
     const status = errors.length ? "invalid" : "valid";
     if (status === "valid") valid += 1;
     if (status !== row.status || toJson(errors) !== toJson(fromJson(row.errors) || [])) {
@@ -278,9 +280,9 @@ export async function updateImportRows(batchId, schoolId, updates) {
       if (!Number.isInteger(id) || !editable.has(id)) throw new ImportError("A reviewed row is no longer part of this import. Reload the page and try again.", 409);
       const data = normalizeRow(update);
       await connection.query(
-        `UPDATE import_rows SET extracted = ?, admission_number = ?, full_name = ?, photo_ref = ?
+        `UPDATE import_rows SET extracted = ?, student_account_no = ?, full_name = ?, photo_ref = ?
          WHERE id = ? AND batch_id = ? AND school_id = ?`,
-        [toJson(data), data.admission_number || null, `${data.first_name} ${data.last_name}`.trim() || null, data.photo_url || null, id, batchId, schoolId],
+        [toJson(data), data.student_account_no || null, `${data.first_name} ${data.last_name}`.trim() || null, data.photo_url || null, id, batchId, schoolId],
       );
     }
 
@@ -295,26 +297,24 @@ export async function updateImportRows(batchId, schoolId, updates) {
   }
 }
 
-function makeUid(schoolId, admissionNumber) {
-  const safeSchool = String(schoolId).toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-|-$/g, "");
-  const safeAdmission = String(admissionNumber).toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-|-$/g, "");
-  return `SIRIUS-${safeSchool}-${safeAdmission}`.slice(0, 64);
+function makeUid() {
+  return `SIRIUS-${randomBytes(16).toString("hex").toUpperCase()}`;
 }
 
 const upsertStudentSql = `
   INSERT INTO students
-    (school_id, student_uid, admission_number, first_name, last_name, full_name, gender, class_name, stream, photo_url, parent_name, parent_phone, school_name, card_extra, import_batch_id)
+    (school_id, student_uid, student_account_no, first_name, last_name, full_name, gender, class_name, stream, photo_url, parent_name, parent_phone, school_name, card_extra, import_batch_id)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON DUPLICATE KEY UPDATE
     first_name = VALUES(first_name), last_name = VALUES(last_name), full_name = VALUES(full_name),
     gender = VALUES(gender), class_name = VALUES(class_name), stream = VALUES(stream),
     photo_url = VALUES(photo_url), parent_name = VALUES(parent_name), parent_phone = VALUES(parent_phone),
-    school_name = VALUES(school_name), card_extra = VALUES(card_extra),
+    school_name = VALUES(school_name), card_extra = VALUES(card_extra), version = version + 1,
     import_batch_id = VALUES(import_batch_id), updated_at = CURRENT_TIMESTAMP`;
 
 /**
  * Commits one staged batch into students in a single transaction. Rows are
- * matched on the natural key (school_id, admission_number) so a re-import
+ * matched on the natural key (school_id, student_account_no) so a re-import
  * updates the existing record instead of creating a duplicate.
  */
 export async function commitImportBatch(batchId, schoolId) {
@@ -337,28 +337,28 @@ export async function commitImportBatch(batchId, schoolId) {
       "SELECT id, extracted FROM import_rows WHERE batch_id = ? AND school_id = ? AND status = 'valid' ORDER BY `row_number`",
       [batchId, schoolId],
     );
-    const rows = stagedRows.map((row) => ({ id: row.id, extracted: fromJson(row.extracted) || {} }));
+    const rows = stagedRows.map((row) => ({ id: row.id, extracted: normalizeRow(fromJson(row.extracted) || {}) }));
     const [[school]] = await connection.query("SELECT school_name FROM schools WHERE school_id = ? LIMIT 1", [schoolId]);
 
-    const admissions = rows.map((row) => row.extracted.admission_number);
+    const accountNumbers = rows.map((row) => row.extracted.student_account_no);
     const existing = new Map();
-    for (let index = 0; index < admissions.length; index += insertChunkSize) {
+    for (let index = 0; index < accountNumbers.length; index += insertChunkSize) {
       const [found] = await connection.query(
-        "SELECT id, admission_number FROM students WHERE school_id = ? AND admission_number IN (?)",
-        [schoolId, admissions.slice(index, index + insertChunkSize)],
+        "SELECT id, student_account_no FROM students WHERE school_id = ? AND student_account_no IN (?)",
+        [schoolId, accountNumbers.slice(index, index + insertChunkSize)],
       );
-      for (const student of found) existing.set(student.admission_number.toLowerCase(), student.id);
+      for (const student of found) existing.set(student.student_account_no.toLowerCase(), student.id);
     }
 
     // Only genuinely NEW learners consume the plan's learner allowance — a
     // re-import of rows the school already has is free. Counted on distinct
-    // admission numbers, since the batch may repeat one.
-    const newAdmissions = new Set();
+    // student account numbers, since the batch may repeat one.
+    const newAccountNumbers = new Set();
     for (const row of rows) {
-      const key = String(row.extracted.admission_number).toLowerCase();
-      if (!existing.has(key)) newAdmissions.add(key);
+      const key = String(row.extracted.student_account_no).toLowerCase();
+      if (!existing.has(key)) newAccountNumbers.add(key);
     }
-    const over = await checkCapacity(schoolId, "learners", newAdmissions.size);
+    const over = await checkCapacity(schoolId, "learners", newAccountNumbers.size);
     if (over) throw new ImportError(over.body.error, over.status);
 
     let imported = 0;
@@ -366,8 +366,8 @@ export async function commitImportBatch(batchId, schoolId) {
       const student = row.extracted;
       const [result] = await connection.query(upsertStudentSql, [
         schoolId,
-        makeUid(schoolId, student.admission_number),
-        student.admission_number,
+        makeUid(),
+        student.student_account_no,
         student.first_name,
         student.last_name,
         `${student.first_name} ${student.last_name}`.trim(),
@@ -381,7 +381,7 @@ export async function commitImportBatch(batchId, schoolId) {
         toJson(student),
         batchId,
       ]);
-      const studentId = existing.get(student.admission_number.toLowerCase()) ?? result.insertId;
+      const studentId = existing.get(student.student_account_no.toLowerCase()) ?? result.insertId;
       await connection.query("UPDATE import_rows SET student_id = ?, status = 'committed' WHERE id = ? AND school_id = ?", [studentId, row.id, schoolId]);
       imported += 1;
     }

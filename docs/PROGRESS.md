@@ -289,3 +289,46 @@ remediation commits were made as part of this audit.
 - Remaining roadmap work: Step 4 student core, Step 5 import diff pipeline,
   Step 6 identity/verification/clearance, Step 7 card designer, Step 8
   hardening.
+
+## 2026-11-07 — Step 4 student core
+
+### Done
+
+- Added migration 006 to rename `admission_number` to
+  `student_account_no` in student and staged-import rows, check for duplicate
+  numbers per school before the rename, and add the scoped unique key,
+  `DECIMAL(14,2)` fee balance, and optimistic-concurrency version.
+- Migration application is resumable across partial DDL completion. Existing
+  staged JSON rows using the former field name remain readable; spreadsheet
+  imports continue accepting legacy admission-number headers.
+- Added append-only fee-balance history for manual create/edit operations.
+  Imports preserve fee balances, and every student/profile/photo edit bumps the
+  version. Student mutations and their audit records are committed together.
+- Added individual student creation and profile editing. The imported/student
+  account number is required input and is never generated; duplicate numbers
+  are rejected within the school. Student UIDs generated for new records are
+  random rather than derived from that number.
+- Updated student search, import review, cards, scan/profile displays,
+  verification output, and spreadsheet documentation to use the new field.
+  The public verification response no longer returns the student number or
+  gender and includes a data-as-of timestamp.
+
+### Verification
+
+- `npm.cmd test`: passed, 27 tests.
+- `npm.cmd run build`: passed.
+- `node --check scripts/migrate.mjs`, `node --check scripts/seed-demo.mjs`,
+  and `git diff --check`: passed.
+- Migration 006 was **not** applied: the configured database is not known to
+  be disposable. Its TiDB execution and migration re-run behavior still need
+  verification against a dedicated test database.
+
+### Next / known issues
+
+- Step 2's real-database two-school leak suite and migration verification are
+  still outstanding; the current tests do not prove database isolation.
+- Step 5 import versioning, richer column mapping, field-level diff/acceptance,
+  and rollback remain next. Step 6 must still replace legacy QR identifiers
+  with permanent public tokens and complete clearance verification behavior.
+- The prior push was denied with HTTP 403. No remote or credential workaround
+  was attempted; retry only after repository permissions are corrected.

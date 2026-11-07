@@ -3,7 +3,7 @@ import Link from "next/link";
 export const metadata = { title: "Documentation | Sirius" };
 
 const excelColumns = [
-  { name: "admission_number", required: true, description: "Unique student admission or registration number.", example: "JIPRA-2026-001" },
+  { name: "student_account_no", required: true, description: "Student number provided by the school; Sirius never generates it.", example: "JIPRA-2026-001" },
   { name: "first_name", required: true, description: "Student's first name.", example: "Amina" },
   { name: "last_name", required: true, description: "Student's last name.", example: "Njoroge" },
   { name: "gender", required: false, description: "Student's gender.", example: "Female" },
@@ -15,7 +15,7 @@ const excelColumns = [
 ];
 
 const excelAliases = [
-  { column: "admission_number", aliases: "admission, Admission Number" },
+  { column: "student_account_no", aliases: "admission_number, admission, Admission Number" },
   { column: "first_name", aliases: "firstName, First Name" },
   { column: "last_name", aliases: "lastName, Last Name" },
   { column: "class_name", aliases: "class, Class" },
@@ -38,7 +38,7 @@ export default function DocumentationPage() {
         <h1>Documentation</h1>
         <p className="intro-copy">The essential workflow for running Sirius at your school, and everything you need to know about its data and activity records.</p>
         <div className="docs-list">
-          <article><span>01</span><div><h2>Import records</h2><p>Open Import, upload an `.xlsx`, `.xls`, or `.csv` file, review validation results, and commit valid rows. Admission number, first name, and last name are required. See the full spreadsheet structure below.</p></div></article>
+          <article><span>01</span><div><h2>Import records</h2>          <p>Open Import, upload an `.xlsx`, `.xls`, or `.csv` file, review validation results, and commit valid rows. Student account number, first name, and last name are required. See the full spreadsheet structure below.</p></div></article>
           <article><span>02</span><div><h2>Add photos</h2><p>Open a student profile and upload a JPEG, PNG, or WebP image. Photos are stored securely in Cloudinary and used on profiles and cards.</p></div></article>
           <article><span>03</span><div><h2>Print cards</h2><p>Open Cards to create stable QR codes and print card-ready layouts. A QR payload contains only the student&apos;s Sirius ID.</p></div></article>
           <article><span>04</span><div><h2>Scan and identify</h2><p>Open Scan and use the camera or a USB scanner. Sirius looks up the ID and displays the learner profile.</p></div></article>
@@ -62,7 +62,7 @@ export default function DocumentationPage() {
                   </tbody>
                 </table>
               </div>
-              <p>A row is skipped during import if <code>admission_number</code>, <code>first_name</code>, or <code>last_name</code> is missing. Admission numbers must be unique within the file; existing students with the same admission number are updated instead of duplicated. Leading and trailing spaces in cell values are removed, and the importer previews all rows first, importing only valid rows once you confirm.</p>
+              <p>A row is skipped during import if <code>student_account_no</code>, <code>first_name</code>, or <code>last_name</code> is missing. Student account numbers must be unique within the file and school; existing students with the same number are updated instead of duplicated. Leading and trailing spaces in cell values are removed, and the importer previews all rows first, importing only valid rows once you confirm.</p>
               <p>Sirius also recognizes these alternative column headings:</p>
               <div className="docs-table-wrap">
                 <table className="docs-table">

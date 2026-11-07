@@ -3,6 +3,7 @@ import { searchStudents } from "@/lib/students";
 import { getSession } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import LogoutButton from "../LogoutButton";
+import StudentCreateForm from "./StudentCreateForm";
 
 export const dynamic = "force-dynamic";
 
@@ -32,10 +33,11 @@ export default async function StudentsPage({ searchParams }) {
       </header>
       <main className="dashboard students-page">
         <div className="page-title"><div><p className="eyebrow">Student records</p><h1>Students</h1><p className="intro-copy">Search and manage the learners in your school.</p></div><Link className="button button-primary" href="/import"><span>+</span> Import students</Link></div>
+        <StudentCreateForm />
         <form className="search-bar" method="get">
-          <span className="search-icon">⌕</span><input name="search" defaultValue={search} placeholder="Search by name, admission number or Sirius ID" aria-label="Search students" /><button type="submit">Search</button>
+          <span className="search-icon">⌕</span><input name="search" defaultValue={search} placeholder="Search by name, student account number or Sirius ID" aria-label="Search students" /><button type="submit">Search</button>
         </form>
-        {databaseError ? <div className="empty-state"><strong>Unable to connect to student records.</strong><p>Please check the database connection and try again.</p></div> : students.length === 0 ? <div className="empty-state"><strong>No students found.</strong><p>Try a different search or import a spreadsheet.</p></div> : <div className="student-table">{students.map((student) => <Link className="student-row" href={`/students/${encodeURIComponent(student.student_uid)}`} key={student.id}><span className="student-avatar">{student.full_name.slice(0, 1)}</span><span className="student-name"><strong>{student.full_name}</strong><small>{student.admission_number} · {student.student_uid}</small></span><span className="student-class">{student.class_name || "No class"}{student.stream ? ` · ${student.stream}` : ""}</span><span className="status"><i />Active</span></Link>)}</div>}
+        {databaseError ? <div className="empty-state"><strong>Unable to connect to student records.</strong><p>Please check the database connection and try again.</p></div> : students.length === 0 ? <div className="empty-state"><strong>No students found.</strong><p>Try a different search or import a spreadsheet.</p></div> : <div className="student-table">{students.map((student) => <Link className="student-row" href={`/students/${encodeURIComponent(student.student_uid)}`} key={student.id}><span className="student-avatar">{student.full_name.slice(0, 1)}</span><span className="student-name"><strong>{student.full_name}</strong><small>{student.student_account_no} · {student.student_uid}</small></span><span className="student-class">{student.class_name || "No class"}{student.stream ? ` · ${student.stream}` : ""}</span><span className="status"><i />Active</span></Link>)}</div>}
       </main>
     </div>
   );

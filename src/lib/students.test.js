@@ -5,8 +5,8 @@ import assert from "node:assert/strict";
 // real tenant-filtered query would, and records every call so the test can
 // assert which tenant was asked for.
 const schools = {
-  sch_a: [{ id: 1, school_id: "sch_a", student_uid: "SIRIUS-A-1", admission_number: "A-1", full_name: "Amina A", class_name: "Form 1", stream: "", photo_url: "", status: "active" }],
-  sch_b: [{ id: 2, school_id: "sch_b", student_uid: "SIRIUS-B-1", admission_number: "B-1", full_name: "Brian B", class_name: "Form 2", stream: "", photo_url: "", status: "active" }],
+  sch_a: [{ id: 1, school_id: "sch_a", student_uid: "SIRIUS-A-1", student_account_no: "A-1", full_name: "Amina A", class_name: "Form 1", stream: "", photo_url: "", status: "active" }],
+  sch_b: [{ id: 2, school_id: "sch_b", student_uid: "SIRIUS-B-1", student_account_no: "B-1", full_name: "Brian B", class_name: "Form 2", stream: "", photo_url: "", status: "active" }],
 };
 
 const calls = [];

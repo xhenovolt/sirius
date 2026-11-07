@@ -19,6 +19,29 @@ const migrationsDir = path.join("database", "migrations");
 const files = (await fs.readdir(migrationsDir)).filter((file) => file.endsWith(".sql")).sort();
 
 async function checkStudentUidMigrationPreconditions(connection, file) {
+  if (file === "006_student_core.sql") {
+    const [columns] = await connection.query("SHOW COLUMNS FROM students");
+    const columnNames = new Set(columns.map((column) => column.Field));
+    const accountNumberColumn = columnNames.has("student_account_no")
+      ? "student_account_no"
+      : columnNames.has("admission_number") ? "admission_number" : null;
+    if (!accountNumberColumn) throw new Error(`Cannot apply ${file}: no student account-number column exists.`);
+    const [duplicates] = await connection.query(`
+      SELECT school_id, \`${accountNumberColumn}\` AS account_number, COUNT(*) AS duplicate_count
+        FROM students
+       GROUP BY school_id, \`${accountNumberColumn}\`
+      HAVING COUNT(*) > 1
+       LIMIT 1
+    `);
+    if (duplicates.length) {
+      const row = duplicates[0];
+      throw new Error(
+        `Cannot apply ${file}: duplicate imported student number ${JSON.stringify(row.account_number)} ` +
+        `exists in school ${JSON.stringify(row.school_id)}.`,
+      );
+    }
+    return;
+  }
   if (file !== "005_school_scoped_student_uid.sql") return;
 
   const [duplicateAccounts] = await connection.query(`
@@ -53,6 +76,45 @@ async function checkStudentUidMigrationPreconditions(connection, file) {
 }
 
 async function applyMigration(connection, file) {
+  if (file === "006_student_core.sql") {
+    const [studentColumns] = await connection.query("SHOW COLUMNS FROM students");
+    const studentColumnNames = new Set(studentColumns.map((column) => column.Field));
+    const [studentIndexes] = await connection.query("SHOW INDEX FROM students");
+    const studentIndexNames = new Set(studentIndexes.map((index) => index.Key_name));
+
+    if (studentColumnNames.has("admission_number")) {
+      if (studentIndexNames.has("students_school_admission_unique")) {
+        await connection.query("ALTER TABLE students DROP INDEX students_school_admission_unique");
+      }
+      await connection.query(
+        "ALTER TABLE students CHANGE COLUMN admission_number student_account_no VARCHAR(64) NOT NULL",
+      );
+    }
+    if (!studentIndexNames.has("students_school_account_unique")) {
+      await connection.query(
+        "ALTER TABLE students ADD UNIQUE KEY students_school_account_unique (school_id, student_account_no)",
+      );
+    }
+
+    const [stagingColumns] = await connection.query("SHOW COLUMNS FROM import_rows");
+    const stagingColumnNames = new Set(stagingColumns.map((column) => column.Field));
+    if (stagingColumnNames.has("admission_number")) {
+      await connection.query(
+        "ALTER TABLE import_rows CHANGE COLUMN admission_number student_account_no VARCHAR(64) NULL",
+      );
+    }
+    if (!studentColumnNames.has("fee_balance")) {
+      await connection.query(
+        "ALTER TABLE students ADD COLUMN fee_balance DECIMAL(14, 2) NOT NULL DEFAULT 0",
+      );
+    }
+    if (!studentColumnNames.has("version")) {
+      await connection.query(
+        "ALTER TABLE students ADD COLUMN version BIGINT UNSIGNED NOT NULL DEFAULT 1",
+      );
+    }
+    return connection.query(await fs.readFile(path.join(migrationsDir, file), "utf8"));
+  }
   if (file !== "005_school_scoped_student_uid.sql") {
     return connection.query(await fs.readFile(path.join(migrationsDir, file), "utf8"));
   }
