@@ -529,3 +529,32 @@ remediation commits were made as part of this audit.
   transactional flows, logging, backups, and deployment checklist.
 - Migrations 007-012 are still unverified against a dedicated TiDB database;
   previously printed UID-based QR cards still need reprinting.
+
+## 2026-11-08 — Step 8 repository hardening and deployment checklist
+
+### Done
+
+- Added a staging-first deployment checklist covering secret handling,
+  migrations, TiDB backups and restore drills, tenancy testing, verification
+  privacy, clearance behavior, card printing, and release smoke tests.
+- Confirmed `.env*` is ignored, the repository source has no `NEXT_PUBLIC_*`
+  database credentials, and token verification audit records do not persist
+  raw QR tokens.
+- Re-ran the complete repository test suite and production build.
+
+### Verification
+
+- `npm.cmd test`: passed, 48 tests. Current tenancy integration tests still
+  mock the database.
+- `npm.cmd run build`: passed.
+- `git diff --check`: passed.
+- No migration command or database mutation was run.
+
+### Next / known issues
+
+- **Blocked pending a dedicated disposable TiDB target:** migrations 007-012
+  and real two-school isolation/transaction tests have not been run. Configure
+  that test database before claiming Step 2 and database hardening complete.
+- Backup policy, restore drill, monitoring, and deployment ownership must be
+  confirmed for the actual TiDB hosting environment; this repository cannot
+  verify provider-side operations.
