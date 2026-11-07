@@ -576,3 +576,32 @@ remediation commits were made as part of this audit.
   that a separately deployed application points to this database. No backup
   or restore drill was performed. Real two-school isolation tests remain
   outstanding.
+
+## 2026-11-08 — Import fee-balance review and history
+
+### Done
+
+- Added fee-balance header aliases and import review editing/mapping.
+- Import validation rejects negative values, more than two fractional digits,
+  excess precision, and non-numeric formats. Values normalize as exact decimal
+  strings; no floating-point arithmetic is used.
+- Blank fee-balance cells do not create a diff or clear an existing balance.
+  New records default to zero unless a reviewed balance is accepted.
+- Accepted import balances are written with their student update in the import
+  transaction and recorded in `fee_balance_history`, attributed to the acting
+  school user. Batch rollback restores the old balance and adds a reversal
+  history entry.
+
+### Verification
+
+- `npm.cmd test`: passed, 51 tests, including fee parsing, validation, review,
+  acceptance, and blank-cell preservation.
+- `npm.cmd run build`: passed.
+- `git diff --check`: passed.
+
+### Next / known issues
+
+- Add and run a real-TiDB two-school integration suite against a dedicated test
+  database. Do not use the production-configured database for fixtures.
+- Production deployment/runtime verification and provider backup/restore
+  operations are not confirmed by repository tests.

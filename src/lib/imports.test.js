@@ -23,6 +23,7 @@ test("normalizeRow maps spreadsheet column names onto student fields", () => {
     photo_url: "",
     parent_name: "",
     parent_phone: "+254700000001",
+    fee_balance: "",
   });
 });
 
@@ -39,6 +40,11 @@ test("normalizeRow prefers the first alias that carries a value", () => {
   const row = normalizeRow({ admission_number: "", admission: "A-2" });
 
   assert.equal(row.student_account_no, "A-2");
+});
+
+test("normalizeRow accepts fee balance headers and normalizes exact decimals", () => {
+  const row = normalizeRow({ "Outstanding Balance": "00125.5" });
+  assert.equal(row.fee_balance, "125.50");
 });
 
 test("normalizeRow uses the confirmed mapping instead of guessing aliases", () => {
@@ -75,6 +81,16 @@ test("validateRow rejects values wider than the student column", () => {
   assert.deepEqual(errors, ["student account number is longer than 64 characters"]);
 });
 
+test("validateRow rejects invalid fee balances and accepts zero", () => {
+  const base = { student_account_no: "A-1", first_name: "A", last_name: "B" };
+  for (const fee_balance of ["-1", "1.234", "1000000000000", "1,000"]) {
+    assert.deepEqual(validateRow({ ...base, fee_balance }), [
+      "fee balance must be a non-negative amount with up to two decimal places",
+    ]);
+  }
+  assert.deepEqual(validateRow({ ...base, fee_balance: "0" }), []);
+});
+
 test("import review classifies new, changed, unchanged, duplicate and invalid rows", () => {
   const row = {
     id: 1,
@@ -95,11 +111,31 @@ test("import review classifies new, changed, unchanged, duplicate and invalid ro
     existing_student_account_no: "A-1",
     existing_first_name: "Amina",
     existing_last_name: "Njoroge",
+    existing_fee_balance: "125.00",
   };
   assert.equal(shapeImportRow(existing).diffType, "UNCHANGED");
   assert.equal(shapeImportRow({ ...existing, existing_first_name: "Amira" }).diffType, "CHANGED");
   assert.equal(shapeImportRow({ ...row, errors: ["duplicate student account number in file"], status: "invalid" }).diffType, "DUPLICATE");
   assert.equal(shapeImportRow({ ...row, errors: ["last name is required"], status: "invalid" }).diffType, "INVALID");
+});
+
+test("fee balance is a reviewable change, while a blank cell preserves the current balance", () => {
+  assert.deepEqual(
+    acceptedStudentChanges(
+      { fee_balance: "125.00" },
+      { fee_balance: "0.00" },
+      ["fee_balance"],
+    ),
+    { fee_balance: "0.00" },
+  );
+  assert.deepEqual(
+    acceptedStudentChanges(
+      { fee_balance: "125.00" },
+      { fee_balance: "" },
+      ["fee_balance"],
+    ),
+    {},
+  );
 });
 
 test("accepting one name change does not overwrite the rejected name in the full name", () => {

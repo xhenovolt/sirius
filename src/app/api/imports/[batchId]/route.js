@@ -79,7 +79,7 @@ export async function POST(request, { params }) {
   if (!batchId) return NextResponse.json({ error: "Invalid import batch." }, { status: 400 });
 
   try {
-    const result = await commitImportBatch(batchId, session.school_id);
+    const result = await commitImportBatch(batchId, session.school_id, session);
     await recordAuditLog({
       session,
       request,

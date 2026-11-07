@@ -16,6 +16,7 @@ export const fieldAliases = {
   photo_url: ["photo_url", "photo", "photo url", "profile photo", "image url", "Photo"],
   parent_name: ["parent_name", "parent", "parent name", "guardian name", "Parent Name"],
   parent_phone: ["parent_phone", "parentPhone", "parent phone", "guardian phone", "contact number", "Parent Phone"],
+  fee_balance: ["fee_balance", "fee balance", "balance", "outstanding balance", "Outstanding Balance", "fees balance"],
 };
 
 // Mirrors the column widths in database/schema.sql so an oversized value is
@@ -32,6 +33,7 @@ const maxLengths = {
   parent_phone: 32,
 };
 const fieldLabels = { student_account_no: "student account number" };
+const feeBalancePattern = /^\d{1,12}(?:\.\d{1,2})?$/;
 
 export const maxImportRows = 20000;
 export const defaultPageSize = 50;
@@ -49,6 +51,11 @@ export class ImportError extends Error {
 
 function clean(value) {
   return value === undefined || value === null ? "" : String(value).trim();
+}
+
+function normalizeFeeBalance(value) {
+  const [whole, fraction = ""] = value.split(".");
+  return `${whole.replace(/^0+(?=\d)/, "")}.${fraction.padEnd(2, "0")}`;
 }
 
 function toJson(value) {
@@ -81,6 +88,9 @@ export function normalizeRow(row, mapping) {
         }
       }
     }
+    if (field === "fee_balance" && value && feeBalancePattern.test(value)) {
+      value = normalizeFeeBalance(value);
+    }
     normalized[field] = value;
   }
   return normalized;
@@ -95,6 +105,10 @@ export function validateRow(extracted, duplicateAccountNumbers = new Set()) {
   for (const [field, limit] of Object.entries(maxLengths)) {
     if (clean(extracted?.[field]).length > limit) errors.push(`${fieldLabels[field] || field.replaceAll("_", " ")} is longer than ${limit} characters`);
   }
+  const feeBalance = clean(extracted?.fee_balance);
+  if (feeBalance && !feeBalancePattern.test(feeBalance)) {
+    errors.push("fee balance must be a non-negative amount with up to two decimal places");
+  }
 
   const key = clean(extracted?.student_account_no).toLowerCase();
   if (key && duplicateAccountNumbers.has(key)) errors.push("duplicate student account number in file");
@@ -105,7 +119,9 @@ export function validateRow(extracted, duplicateAccountNumbers = new Set()) {
 export function acceptedStudentChanges(current, proposed, acceptedFields) {
   const accepted = new Set(acceptedFields);
   const changedFields = Object.keys(fieldAliases).filter(
-    (field) => accepted.has(field) && clean(current[field]) !== clean(proposed[field]),
+    (field) => accepted.has(field)
+      && !(field === "fee_balance" && !clean(proposed[field]))
+      && clean(current[field]) !== clean(proposed[field]),
   );
   const changes = Object.fromEntries(changedFields.map((field) => [field, proposed[field] || null]));
   if (changedFields.includes("first_name") || changedFields.includes("last_name")) {
@@ -139,16 +155,19 @@ export function shapeImportRow(row) {
     photo_url: row.existing_photo_url,
     parent_name: row.existing_parent_name,
     parent_phone: row.existing_parent_phone,
+    fee_balance: row.existing_fee_balance,
   };
   const differences = {};
   if (current) {
     for (const field of Object.keys(fieldAliases)) {
+      if (field === "fee_balance" && !extracted[field]) continue;
       if (clean(current[field]) !== clean(extracted[field])) {
         differences[field] = { current: current[field] ?? "", proposed: extracted[field] };
       }
     }
   } else {
     for (const field of Object.keys(fieldAliases)) {
+      if (field === "fee_balance" && !extracted[field]) continue;
       if (extracted[field]) differences[field] = { current: "", proposed: extracted[field] };
     }
   }
@@ -406,7 +425,8 @@ export async function listImportRows(batchId, schoolId, { page = 1, pageSize = d
             s.first_name AS existing_first_name, s.last_name AS existing_last_name,
             s.gender AS existing_gender, s.class_name AS existing_class_name,
             s.stream AS existing_stream, s.photo_url AS existing_photo_url,
-            s.parent_name AS existing_parent_name, s.parent_phone AS existing_parent_phone
+            s.parent_name AS existing_parent_name, s.parent_phone AS existing_parent_phone,
+            s.fee_balance AS existing_fee_balance
        FROM import_rows ir
        LEFT JOIN students s ON s.school_id = ir.school_id
                             AND s.student_account_no = ir.student_account_no
@@ -511,8 +531,8 @@ function makeUid() {
 
 const insertStudentSql = `
   INSERT INTO students
-    (school_id, student_uid, student_account_no, first_name, last_name, full_name, gender, class_name, stream, photo_url, parent_name, parent_phone, school_name, card_extra, import_batch_id)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+    (school_id, student_uid, student_account_no, first_name, last_name, full_name, gender, class_name, stream, photo_url, parent_name, parent_phone, school_name, fee_balance, card_extra, import_batch_id)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
 const importRollbackFields = [
   "student_account_no",
@@ -526,6 +546,7 @@ const importRollbackFields = [
   "parent_name",
   "parent_phone",
   "school_name",
+  "fee_balance",
   "card_extra",
   "import_batch_id",
   "status",
@@ -545,7 +566,7 @@ async function saveImportUndo(scoped, { schoolId, batchId, studentId, existedBef
  * matched on the natural key (school_id, student_account_no) so a re-import
  * updates the existing record instead of creating a duplicate.
  */
-export async function commitImportBatch(batchId, schoolId) {
+export async function commitImportBatch(batchId, schoolId, session = null) {
   assertTenantId(schoolId);
   return withTenantTransaction(schoolId, async (scoped) => {
     const [batchRows] = await scoped.query(
@@ -576,7 +597,7 @@ export async function commitImportBatch(batchId, schoolId) {
       const [found] = await scoped.query(
         `SELECT id, student_account_no, first_name, last_name, full_name, gender,
                 class_name, stream, photo_url, parent_name, parent_phone, school_name,
-                card_extra, import_batch_id, status, version
+                fee_balance, card_extra, import_batch_id, status, version
            FROM students
           WHERE school_id = ? AND student_account_no IN (?)
           FOR UPDATE`,
@@ -636,10 +657,17 @@ export async function commitImportBatch(batchId, schoolId) {
           acceptedData.parent_name || null,
           acceptedData.parent_phone || null,
           school?.school_name || null,
+          acceptedData.fee_balance || "0.00",
           toJson(acceptedData),
           batchId,
         ]);
         studentId = result.insertId;
+        await scoped.query(
+          `INSERT INTO fee_balance_history
+            (school_id, student_id, previous_balance, new_balance, changed_by, source)
+           VALUES (?, ?, 0, ?, ?, 'import')`,
+          [schoolId, studentId, acceptedData.fee_balance || "0.00", session?.id || null],
+        );
         await saveImportUndo(scoped, {
           schoolId,
           batchId,
@@ -677,6 +705,14 @@ export async function commitImportBatch(batchId, schoolId) {
             `UPDATE students SET ${assignments.join(", ")} WHERE id = ? AND school_id = ?`,
             values,
           );
+          if (Object.hasOwn(changes, "fee_balance")) {
+            await scoped.query(
+              `INSERT INTO fee_balance_history
+                (school_id, student_id, previous_balance, new_balance, changed_by, source)
+               VALUES (?, ?, ?, ?, ?, 'import')`,
+              [schoolId, studentId, current.fee_balance, changes.fee_balance, session?.id || null],
+            );
+          }
         }
       }
       await scoped.query("UPDATE import_rows SET student_id = ?, status = 'committed' WHERE id = ? AND school_id = ?", [studentId, row.id, schoolId]);
@@ -725,7 +761,7 @@ export async function rollbackImportBatch(batchId, schoolId, session, request) {
     let removed = 0;
     for (const undo of undoRows) {
       const [currentRows] = await scoped.query(
-        "SELECT version FROM students WHERE id = ? AND school_id = ? FOR UPDATE",
+        "SELECT version, fee_balance FROM students WHERE id = ? AND school_id = ? FOR UPDATE",
         [undo.student_id, schoolId],
       );
       const current = currentRows[0];
@@ -748,6 +784,14 @@ export async function rollbackImportBatch(batchId, schoolId, session, request) {
             schoolId,
           ],
         );
+        if (String(current.fee_balance) !== String(previous.fee_balance)) {
+          await scoped.query(
+            `INSERT INTO fee_balance_history
+              (school_id, student_id, previous_balance, new_balance, changed_by, source)
+             VALUES (?, ?, ?, ?, ?, 'import_rollback')`,
+            [schoolId, undo.student_id, current.fee_balance, previous.fee_balance, session?.id || null],
+          );
+        }
         restored += 1;
       } else {
         const [[identity]] = await scoped.query(

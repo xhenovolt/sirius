@@ -14,6 +14,7 @@ const editableFields = [
   { key: "photo_url", label: "Photo URL", wide: true },
   { key: "parent_name", label: "Parent name" },
   { key: "parent_phone", label: "Parent phone" },
+  { key: "fee_balance", label: "Fee balance" },
 ];
 const requiredMappingFields = ["student_account_no", "first_name", "last_name"];
 

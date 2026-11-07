@@ -61,6 +61,7 @@ test("mapping confirmation requires required fields and distinct file columns", 
       photo_url: "",
       parent_name: "",
       parent_phone: "",
+      fee_balance: "",
     },
   );
 });
