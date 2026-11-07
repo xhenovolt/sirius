@@ -558,3 +558,21 @@ remediation commits were made as part of this audit.
 - Backup policy, restore drill, monitoring, and deployment ownership must be
   confirmed for the actual TiDB hosting environment; this repository cannot
   verify provider-side operations.
+
+## 2026-11-08 — Configured TiDB migrations applied
+
+- Correcting the earlier mistaken assumption that the configured database
+  could not be inspected: a read-only connection using `.env.local` succeeded
+  and identified TiDB Serverless 8.5.3. The migration ledger initially
+  contained only 001 and 002.
+- Preflight checks found no duplicate per-school student account numbers or
+  student UIDs, and no audit rows missing a school.
+- `npm.cmd run migrate` applied migrations 003 through 012 successfully.
+  Follow-up read-only verification found all 12 migration records, the
+  `student_account_no`/fee-balance/version columns, the composite
+  `(school_id, student_account_no)` unique key, no global student UID unique
+  index, and the expected control, clearance, import, and card-template tables.
+- This confirms the configured TiDB schema was migrated; it does not verify
+  that a separately deployed application points to this database. No backup
+  or restore drill was performed. Real two-school isolation tests remain
+  outstanding.
