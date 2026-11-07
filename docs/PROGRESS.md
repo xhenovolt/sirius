@@ -364,3 +364,34 @@ remediation commits were made as part of this audit.
   rollback.
 - The Step 2 real-database isolation suite and migration verification remain
   outstanding.
+
+## 2026-11-07 — Step 5b import diffs and explicit decisions
+
+### Done
+
+- Import review joins staged rows to only the same school's current student
+  record and classifies rows as NEW, CHANGED, UNCHANGED, DUPLICATE, or INVALID.
+  Changed fields show current values alongside the proposed editable values.
+- Reviewers can accept/reject rows, accept/reject individual changed fields,
+  or bulk-accept/reject visible valid rows. Decisions persist with staged rows
+  and are included in version snapshots. Commit now writes only accepted
+  fields; unaccepted/rejected rows are skipped, and non-imported fee balances
+  remain untouched.
+- Corrected a field-level name merge case so accepting a first-name change
+  cannot inadvertently apply a rejected last-name change to `full_name`.
+- Added unit coverage for all diff classifications and partial name acceptance.
+
+### Verification
+
+- `npm.cmd test`: passed, 29 tests.
+- `npm.cmd run build`: passed.
+- `node --check` on the changed import modules and `git diff --check`: passed.
+- Migration 008 was not run against TiDB; the live review flow has not been
+  exercised against a real test database.
+
+### Next / known issues
+
+- Step 5 remains in progress: deterministic column mapping/confidence and
+  saved school templates, plus rollback of a committed batch.
+- Step 2 real-database tenant isolation testing and migration verification
+  remain blocked on a dedicated disposable TiDB database.

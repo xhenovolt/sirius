@@ -98,6 +98,20 @@ export function validateRow(extracted, duplicateAccountNumbers = new Set()) {
   return errors;
 }
 
+export function acceptedStudentChanges(current, proposed, acceptedFields) {
+  const accepted = new Set(acceptedFields);
+  const changedFields = Object.keys(fieldAliases).filter(
+    (field) => accepted.has(field) && clean(current[field]) !== clean(proposed[field]),
+  );
+  const changes = Object.fromEntries(changedFields.map((field) => [field, proposed[field] || null]));
+  if (changedFields.includes("first_name") || changedFields.includes("last_name")) {
+    const firstName = changedFields.includes("first_name") ? proposed.first_name : current.first_name;
+    const lastName = changedFields.includes("last_name") ? proposed.last_name : current.last_name;
+    changes.full_name = `${firstName} ${lastName}`.trim();
+  }
+  return changes;
+}
+
 function duplicateAccountNumbersFrom(values) {
   const counts = new Map();
   for (const value of values) {
@@ -107,16 +121,51 @@ function duplicateAccountNumbersFrom(values) {
   return new Set([...counts].filter(([, count]) => count > 1).map(([key]) => key));
 }
 
-function shapeRow(row) {
+export function shapeImportRow(row) {
+  const extracted = normalizeRow(fromJson(row.extracted) || {});
+  const errors = fromJson(row.errors) || [];
+  const decisions = fromJson(row.review_decisions) || {};
+  const current = row.existing_student_id == null ? null : {
+    student_account_no: row.existing_student_account_no,
+    first_name: row.existing_first_name,
+    last_name: row.existing_last_name,
+    gender: row.existing_gender,
+    class_name: row.existing_class_name,
+    stream: row.existing_stream,
+    photo_url: row.existing_photo_url,
+    parent_name: row.existing_parent_name,
+    parent_phone: row.existing_parent_phone,
+  };
+  const differences = {};
+  if (current) {
+    for (const field of Object.keys(fieldAliases)) {
+      if (clean(current[field]) !== clean(extracted[field])) {
+        differences[field] = { current: current[field] ?? "", proposed: extracted[field] };
+      }
+    }
+  } else {
+    for (const field of Object.keys(fieldAliases)) {
+      if (extracted[field]) differences[field] = { current: "", proposed: extracted[field] };
+    }
+  }
+  const isDuplicate = errors.some((error) => error.includes("duplicate student account number"));
+  const diffType = errors.length
+    ? isDuplicate ? "DUPLICATE" : "INVALID"
+    : !current ? "NEW"
+      : Object.keys(differences).length ? "CHANGED" : "UNCHANGED";
+
   return {
     id: row.id,
     rowNumber: row.row_number,
     status: row.status,
+    diffType,
+    differences,
+    reviewDecisions: decisions,
     studentId: row.student_id,
     studentAccountNo: row.student_account_no || "",
     fullName: row.full_name || "",
-    errors: fromJson(row.errors) || [],
-    extracted: normalizeRow(fromJson(row.extracted) || {}),
+    errors,
+    extracted,
   };
 }
 
@@ -185,7 +234,7 @@ export async function stageImport({ fileName, rows, schoolId, sourceFile, conten
 
 async function saveBatchVersion(scoped, batchId, schoolId, versionNo, createdBy) {
   const [rows] = await scoped.query(
-    `SELECT id, \`row_number\`, student_account_no, full_name, extracted, errors, status
+    `SELECT id, \`row_number\`, student_account_no, full_name, extracted, errors, status, review_decisions
        FROM import_rows
       WHERE batch_id = ? AND school_id = ?
       ORDER BY \`row_number\``,
@@ -300,13 +349,22 @@ export async function listImportRows(batchId, schoolId, { page = 1, pageSize = d
   const current = Math.min(Math.max(Number(page) || 1, 1), Math.max(1, Math.ceil(counts.total / size)));
   const [rows] = await queryTenant(
     schoolId,
-    `SELECT id, \`row_number\`, student_account_no, full_name, extracted, errors, status, student_id
-     FROM import_rows WHERE batch_id = ? AND school_id = ? ${statusFilter}
+    `SELECT ir.id, ir.\`row_number\`, ir.student_account_no, ir.full_name, ir.extracted,
+            ir.errors, ir.status, ir.student_id, ir.review_decisions,
+            s.id AS existing_student_id, s.student_account_no AS existing_student_account_no,
+            s.first_name AS existing_first_name, s.last_name AS existing_last_name,
+            s.gender AS existing_gender, s.class_name AS existing_class_name,
+            s.stream AS existing_stream, s.photo_url AS existing_photo_url,
+            s.parent_name AS existing_parent_name, s.parent_phone AS existing_parent_phone
+       FROM import_rows ir
+       LEFT JOIN students s ON s.school_id = ir.school_id
+                            AND s.student_account_no = ir.student_account_no
+      WHERE ir.batch_id = ? AND ir.school_id = ? ${statusFilter.replaceAll("status", "ir.status")}
      ORDER BY \`row_number\` LIMIT ? OFFSET ?`,
     [batchId, schoolId, size, (current - 1) * size],
   );
 
-  return { page: current, pageSize: size, total: counts.total, rows: rows.map(shapeRow) };
+  return { page: current, pageSize: size, total: counts.total, rows: rows.map(shapeImportRow) };
 }
 
 /**
@@ -357,19 +415,36 @@ export async function updateImportRows(batchId, schoolId, updates, createdBy = n
     if (batch.status === "completed") throw new ImportError("This import has already been committed.", 409);
 
     const [stagedRows] = await scoped.query(
-      "SELECT id FROM import_rows WHERE batch_id = ? AND school_id = ? AND status IN ('pending', 'valid', 'invalid')",
+      "SELECT id, review_decisions FROM import_rows WHERE batch_id = ? AND school_id = ? AND status IN ('pending', 'valid', 'invalid')",
       [batchId, schoolId],
     );
-    const editable = new Set(stagedRows.map((row) => row.id));
+    const editable = new Map(stagedRows.map((row) => [Number(row.id), fromJson(row.review_decisions) || {}]));
 
     for (const update of updates) {
       const id = Number(update?.id);
       if (!Number.isInteger(id) || !editable.has(id)) throw new ImportError("A reviewed row is no longer part of this import. Reload the page and try again.", 409);
       const data = normalizeRow(update);
+      const previousDecision = editable.get(id);
+      const acceptedFields = Object.hasOwn(update, "acceptedFields")
+        ? update.acceptedFields
+        : previousDecision.acceptedFields || [];
+      if (!Array.isArray(acceptedFields) || acceptedFields.some((field) => !Object.hasOwn(fieldAliases, field))) {
+        throw new ImportError("The selected fields are not valid for this student row.");
+      }
+      const rowDecision = Object.hasOwn(update, "rowDecision")
+        ? update.rowDecision
+        : previousDecision.rowDecision || null;
+      if (rowDecision !== null && !["accepted", "rejected"].includes(rowDecision)) {
+        throw new ImportError("Choose whether to accept or reject this student row.");
+      }
+      const decisions = {
+        acceptedFields: [...new Set(acceptedFields)],
+        rowDecision,
+      };
       await scoped.query(
-        `UPDATE import_rows SET extracted = ?, student_account_no = ?, full_name = ?, photo_ref = ?
+        `UPDATE import_rows SET extracted = ?, student_account_no = ?, full_name = ?, photo_ref = ?, review_decisions = ?
          WHERE id = ? AND batch_id = ? AND school_id = ?`,
-        [toJson(data), data.student_account_no || null, `${data.first_name} ${data.last_name}`.trim() || null, data.photo_url || null, id, batchId, schoolId],
+        [toJson(data), data.student_account_no || null, `${data.first_name} ${data.last_name}`.trim() || null, data.photo_url || null, toJson(decisions), id, batchId, schoolId],
       );
     }
 
@@ -383,16 +458,10 @@ function makeUid() {
   return `SIRIUS-${randomBytes(16).toString("hex").toUpperCase()}`;
 }
 
-const upsertStudentSql = `
+const insertStudentSql = `
   INSERT INTO students
     (school_id, student_uid, student_account_no, first_name, last_name, full_name, gender, class_name, stream, photo_url, parent_name, parent_phone, school_name, card_extra, import_batch_id)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  ON DUPLICATE KEY UPDATE
-    first_name = VALUES(first_name), last_name = VALUES(last_name), full_name = VALUES(full_name),
-    gender = VALUES(gender), class_name = VALUES(class_name), stream = VALUES(stream),
-    photo_url = VALUES(photo_url), parent_name = VALUES(parent_name), parent_phone = VALUES(parent_phone),
-    school_name = VALUES(school_name), card_extra = VALUES(card_extra), version = version + 1,
-    import_batch_id = VALUES(import_batch_id), updated_at = CURRENT_TIMESTAMP`;
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
 /**
  * Commits one staged batch into students in a single transaction. Rows are
@@ -414,20 +483,29 @@ export async function commitImportBatch(batchId, schoolId) {
     if (summary.valid === 0) throw new ImportError("There are no valid rows to import. Correct the flagged rows first.");
 
     const [stagedRows] = await scoped.query(
-      "SELECT id, extracted FROM import_rows WHERE batch_id = ? AND school_id = ? AND status = 'valid' ORDER BY `row_number`",
+      "SELECT id, extracted, review_decisions FROM import_rows WHERE batch_id = ? AND school_id = ? AND status = 'valid' ORDER BY `row_number`",
       [batchId, schoolId],
     );
-    const rows = stagedRows.map((row) => ({ id: row.id, extracted: normalizeRow(fromJson(row.extracted) || {}) }));
+    const rows = stagedRows.map((row) => ({
+      id: row.id,
+      extracted: normalizeRow(fromJson(row.extracted) || {}),
+      decisions: fromJson(row.review_decisions) || {},
+    }));
     const [[school]] = await scoped.query("SELECT school_name FROM schools WHERE school_id = ? LIMIT 1", [schoolId]);
 
     const accountNumbers = rows.map((row) => row.extracted.student_account_no);
     const existing = new Map();
     for (let index = 0; index < accountNumbers.length; index += insertChunkSize) {
       const [found] = await scoped.query(
-        "SELECT id, student_account_no FROM students WHERE school_id = ? AND student_account_no IN (?)",
+        `SELECT id, student_account_no, first_name, last_name, full_name, gender,
+                class_name, stream, photo_url, parent_name, parent_phone, school_name,
+                card_extra, version
+           FROM students
+          WHERE school_id = ? AND student_account_no IN (?)
+          FOR UPDATE`,
         [schoolId, accountNumbers.slice(index, index + insertChunkSize)],
       );
-      for (const student of found) existing.set(student.student_account_no.toLowerCase(), student.id);
+      for (const student of found) existing.set(student.student_account_no.toLowerCase(), student);
     }
 
     // Only genuinely NEW learners consume the plan's learner allowance — a
@@ -436,32 +514,76 @@ export async function commitImportBatch(batchId, schoolId) {
     const newAccountNumbers = new Set();
     for (const row of rows) {
       const key = String(row.extracted.student_account_no).toLowerCase();
-      if (!existing.has(key)) newAccountNumbers.add(key);
+      if (!existing.has(key) && (
+        row.decisions.rowDecision === "accepted" ||
+        requiredFields.every((field) => row.decisions.acceptedFields?.includes(field))
+      )) newAccountNumbers.add(key);
     }
     const over = await checkCapacity(schoolId, "learners", newAccountNumbers.size);
     if (over) throw new ImportError(over.body.error, over.status);
 
     let imported = 0;
+    let skipped = summary.invalid;
     for (const row of rows) {
       const student = row.extracted;
-      const [result] = await scoped.query(upsertStudentSql, [
-        schoolId,
-        makeUid(),
-        student.student_account_no,
-        student.first_name,
-        student.last_name,
-        `${student.first_name} ${student.last_name}`.trim(),
-        student.gender || null,
-        student.class_name || null,
-        student.stream || null,
-        student.photo_url || null,
-        student.parent_name || null,
-        student.parent_phone || null,
-        school?.school_name || null,
-        toJson(student),
-        batchId,
-      ]);
-      const studentId = existing.get(student.student_account_no.toLowerCase()) ?? result.insertId;
+      const key = String(student.student_account_no).toLowerCase();
+      const current = existing.get(key);
+      const decisions = row.decisions;
+      const acceptedFields = decisions.rowDecision === "accepted"
+        ? Object.keys(fieldAliases)
+        : decisions.acceptedFields || [];
+      const newRowAccepted = decisions.rowDecision === "accepted" || requiredFields.every((field) => acceptedFields.includes(field));
+      if (decisions.rowDecision === "rejected" || (!current && !newRowAccepted) || (current && acceptedFields.length === 0 && decisions.rowDecision !== "accepted")) {
+        await scoped.query("UPDATE import_rows SET status = 'skipped' WHERE id = ? AND school_id = ?", [row.id, schoolId]);
+        skipped += 1;
+        continue;
+      }
+
+      let studentId;
+      if (!current) {
+        const acceptedData = Object.fromEntries(Object.keys(fieldAliases).map((field) => [
+          field,
+          acceptedFields.includes(field) ? student[field] : "",
+        ]));
+        const [result] = await scoped.query(insertStudentSql, [
+          schoolId,
+          makeUid(),
+          acceptedData.student_account_no,
+          acceptedData.first_name,
+          acceptedData.last_name,
+          `${acceptedData.first_name} ${acceptedData.last_name}`.trim(),
+          acceptedData.gender || null,
+          acceptedData.class_name || null,
+          acceptedData.stream || null,
+          acceptedData.photo_url || null,
+          acceptedData.parent_name || null,
+          acceptedData.parent_phone || null,
+          school?.school_name || null,
+          toJson(acceptedData),
+          batchId,
+        ]);
+        studentId = result.insertId;
+      } else {
+        studentId = current.id;
+        const changes = acceptedStudentChanges(current, student, acceptedFields);
+        const changedFields = Object.keys(changes).filter((field) => field !== "full_name");
+        if (changedFields.length > 0) {
+          const assignments = changedFields.map((field) => `\`${field}\` = ?`);
+          const values = changedFields.map((field) => changes[field]);
+          if (Object.hasOwn(changes, "full_name")) {
+            assignments.push("full_name = ?");
+            values.push(changes.full_name);
+          }
+          const extras = { ...(fromJson(current.card_extra) || {}) };
+          for (const field of changedFields) extras[field] = student[field];
+          assignments.push("card_extra = ?", "import_batch_id = ?", "version = version + 1", "updated_at = CURRENT_TIMESTAMP");
+          values.push(toJson(extras), batchId, current.id, schoolId);
+          await scoped.query(
+            `UPDATE students SET ${assignments.join(", ")} WHERE id = ? AND school_id = ?`,
+            values,
+          );
+        }
+      }
       await scoped.query("UPDATE import_rows SET student_id = ?, status = 'committed' WHERE id = ? AND school_id = ?", [studentId, row.id, schoolId]);
       imported += 1;
     }
@@ -471,6 +593,6 @@ export async function commitImportBatch(batchId, schoolId) {
       "UPDATE import_batches SET imported_rows = ?, invalid_rows = ?, status = 'completed', completed_at = CURRENT_TIMESTAMP WHERE id = ? AND school_id = ?",
       [imported, summary.invalid, batchId, schoolId],
     );
-    return { batchId, imported, skipped: summary.invalid };
+    return { batchId, imported, skipped };
   });
 }

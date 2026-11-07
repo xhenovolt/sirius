@@ -28,15 +28,34 @@ function seedDrafts(rows) {
   return drafts;
 }
 
+function seedDecisions(rows) {
+  const decisions = {};
+  for (const row of rows) {
+    decisions[row.id] = {
+      acceptedFields: row.reviewDecisions?.acceptedFields || [],
+      rowDecision: row.reviewDecisions?.rowDecision || null,
+    };
+  }
+  return decisions;
+}
+
 function isDirty(row, draft) {
   if (!draft) return false;
   return editableFields.some((field) => (draft[field.key] || "") !== (row.extracted[field.key] || ""));
+}
+
+function isDecisionDirty(row, decision) {
+  const saved = row.reviewDecisions || {};
+  const fields = [...(decision?.acceptedFields || [])].sort();
+  const savedFields = [...(saved.acceptedFields || [])].sort();
+  return decision?.rowDecision !== (saved.rowDecision || null) || fields.join(",") !== savedFields.join(",");
 }
 
 export default function ImportPage() {
   const [batch, setBatch] = useState(null);
   const [rows, setRows] = useState([]);
   const [drafts, setDrafts] = useState({});
+  const [decisions, setDecisions] = useState({});
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [versions, setVersions] = useState([]);
@@ -66,6 +85,7 @@ export default function ImportPage() {
     setBatch(payload.batch);
     setRows(payload.rows);
     setDrafts(seedDrafts(payload.rows));
+    setDecisions(seedDecisions(payload.rows));
     setTotal(payload.total);
     setPage(payload.page);
     setVersions(payload.versions || []);
@@ -117,7 +137,46 @@ export default function ImportPage() {
     setDrafts((current) => ({ ...current, [rowId]: { ...current[rowId], [key]: value } }));
   }
 
-  const dirtyRows = rows.filter((row) => isDirty(row, drafts[row.id]));
+  function chooseRow(row, rowDecision) {
+    setDecisions((current) => ({
+      ...current,
+      [row.id]: {
+        acceptedFields: rowDecision === "accepted" ? editableFields.map((field) => field.key) : [],
+        rowDecision,
+      },
+    }));
+  }
+
+  function toggleField(row, field, checked) {
+    setDecisions((current) => {
+      const currentDecision = current[row.id] || { acceptedFields: [], rowDecision: null };
+      const fields = new Set(currentDecision.rowDecision === "accepted"
+        ? editableFields.map((item) => item.key)
+        : currentDecision.acceptedFields);
+      if (checked) fields.add(field);
+      else fields.delete(field);
+      return {
+        ...current,
+        [row.id]: { acceptedFields: [...fields], rowDecision: null },
+      };
+    });
+  }
+
+  function chooseVisibleRows(rowDecision) {
+    setDecisions((current) => {
+      const next = { ...current };
+      for (const row of rows) {
+        if (row.status === "invalid" || row.status === "skipped" || row.status === "committed") continue;
+        next[row.id] = {
+          acceptedFields: rowDecision === "accepted" ? editableFields.map((field) => field.key) : [],
+          rowDecision,
+        };
+      }
+      return next;
+    });
+  }
+
+  const dirtyRows = rows.filter((row) => isDirty(row, drafts[row.id]) || isDecisionDirty(row, decisions[row.id]));
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   async function saveChanges() {
@@ -129,7 +188,7 @@ export default function ImportPage() {
       const response = await fetch(`/api/imports/${batch.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows: dirtyRows.map((row) => ({ id: row.id, ...drafts[row.id] })), page, pageSize, filter }),
+        body: JSON.stringify({ rows: dirtyRows.map((row) => ({ id: row.id, ...drafts[row.id], ...decisions[row.id] })), page, pageSize, filter }),
       });
       const result = await response.json();
       if (!response.ok) {
@@ -155,7 +214,7 @@ export default function ImportPage() {
         setError(result.error);
         return;
       }
-      setMessage(`${result.imported} students imported. ${result.skipped} invalid rows were skipped.`);
+      setMessage(`${result.imported} students imported. ${result.skipped} rejected or invalid rows were skipped.`);
       await loadBatch(batch.id, 1, "all");
       const historyResponse = await fetch("/api/imports");
       const historyResult = await historyResponse.json();
@@ -221,7 +280,11 @@ export default function ImportPage() {
                 <button type="button" className={filter === "all" ? "active" : ""} onClick={() => loadBatch(batch.id, 1, "all")} disabled={busy}>All rows</button>
                 <button type="button" className={filter === "invalid" ? "active" : ""} onClick={() => loadBatch(batch.id, 1, "invalid")} disabled={busy}>Needs attention ({batch.invalidRows})</button>
               </div>
-              <span className="preview-note">Fix any value in place, then save. Invalid rows are left out of the commit.</span>
+              <span className="preview-note">Compare each row with current records. Accept all, reject, or select fields; only accepted values are committed.</span>
+            </div>
+            <div className="review-bulk-actions">
+              <button type="button" onClick={() => chooseVisibleRows("accepted")} disabled={busy || batch.status !== "preview"}>Accept visible valid rows</button>
+              <button type="button" onClick={() => chooseVisibleRows("rejected")} disabled={busy || batch.status !== "preview"}>Reject visible valid rows</button>
             </div>
             <div className="import-downloads">
               <a href={`/api/imports/${batch.id}/download?source=original`}>Download original file</a>
@@ -245,7 +308,8 @@ export default function ImportPage() {
                     <tr>
                       <th>Row</th>
                       {editableFields.map((field) => <th key={field.key} className={field.wide ? "review-wide" : ""}>{field.label}</th>)}
-                      <th>Status</th>
+                      <th>Diff</th>
+                      <th>Decision</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -253,11 +317,28 @@ export default function ImportPage() {
                       const draft = drafts[row.id] || {};
                       const dirty = isDirty(row, draft);
                       const locked = batch.status !== "preview";
+                      const decision = decisions[row.id] || { acceptedFields: [], rowDecision: null };
                       return (
                         <tr key={row.id} className={dirty ? "dirty-row" : row.status === "invalid" ? "invalid-row" : ""}>
                           <td className="review-row-number">{row.rowNumber}</td>
                           {editableFields.map((field) => (
                             <td key={field.key} className={field.wide ? "review-wide" : ""}>
+                              {row.differences[field.key] && (
+                                <>
+                                  <small className="review-current-value">
+                                    {row.diffType === "NEW" ? "New student" : `Current: ${row.differences[field.key].current || "—"}`}
+                                  </small>
+                                  <label className="review-field-decision">
+                                    <input
+                                      type="checkbox"
+                                      checked={decision.rowDecision === "accepted" || decision.acceptedFields.includes(field.key)}
+                                      onChange={(event) => toggleField(row, field.key, event.target.checked)}
+                                      disabled={busy || locked || row.status === "invalid"}
+                                    />
+                                    Accept
+                                  </label>
+                                </>
+                              )}
                               <input
                                 className={`review-input ${dirty ? "dirty" : ""}`}
                                 value={draft[field.key] || ""}
@@ -268,10 +349,15 @@ export default function ImportPage() {
                             </td>
                           ))}
                           <td>
-                            <span className={`review-status ${row.status === "invalid" ? "invalid" : "valid"}`}>
-                              {row.status === "invalid" ? "Invalid" : row.status === "committed" ? "Imported" : row.status === "skipped" ? "Skipped" : "Ready"}
-                            </span>
+                            <span className={`review-status ${row.diffType.toLowerCase()}`}>{row.diffType}</span>
                             {row.errors.length > 0 && <div className="review-errors">{row.errors.join(", ")}</div>}
+                          </td>
+                          <td>
+                            <div className="review-row-decisions">
+                              <button type="button" onClick={() => chooseRow(row, "accepted")} disabled={busy || locked || row.status === "invalid"}>Accept row</button>
+                              <button type="button" onClick={() => chooseRow(row, "rejected")} disabled={busy || locked || row.status === "invalid"}>Reject</button>
+                              {row.status === "committed" ? "Imported" : row.status === "skipped" ? "Skipped" : decision.rowDecision || (decision.acceptedFields.length ? "Partial" : "Pending")}
+                            </div>
                           </td>
                         </tr>
                       );
@@ -291,8 +377,8 @@ export default function ImportPage() {
                 <button className="button" type="button" onClick={saveChanges} disabled={busy || dirtyRows.length === 0}>
                   Save {dirtyRows.length > 0 ? `${dirtyRows.length} change${dirtyRows.length === 1 ? "" : "s"}` : "changes"}
                 </button>
-                <button className="button button-primary" type="button" onClick={commit} disabled={busy || batch.status !== "preview" || batch.validRows === 0 || dirtyRows.length > 0}>
-                  {batch.status === "completed" ? "Import completed" : `Commit ${batch.validRows} valid students`}
+                <button className="button button-primary" type="button" onClick={commit} disabled={busy || batch.status !== "preview" || dirtyRows.length > 0}>
+                  {batch.status === "completed" ? "Import completed" : "Commit accepted changes"}
                 </button>
               </div>
             </div>
