@@ -745,3 +745,17 @@ remediation commits were made as part of this audit.
   host is running the pushed commit. The configured environment has no
   `APP_BASE_URL`, so the live deployment could not be checked from this
   workspace. The actual entered password cannot be inspected or logged safely.
+
+## 2026-11-08 — Make school password strength platform-configurable
+
+- Replaced the hard-coded 12-character school-account requirement with a
+  Control Center policy. The default is six characters and no composition
+  rules; control users with settings-edit permission can configure the minimum
+  and optionally require uppercase, lowercase, a number, or a symbol.
+- Enforced the policy in school signup, user creation, control-provisioned
+  school admins, administrator password resets, and SMS self-service resets.
+  Existing passwords remain usable until changed. Control Center operator
+  passwords remain separate.
+- Added policy guidance to school-facing password forms and corresponding
+  validation tests. Policy writes now surface database errors rather than
+  reporting a false successful save.

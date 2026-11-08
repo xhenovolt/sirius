@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import { queryTenant, withTenantTransaction } from "./dbTenant.js";
 import { normalizeUgandaPhone } from "./passwordResetIdentity.js";
+import { assertSchoolPassword } from "./schoolPassword.js";
 
 const ASSIGNABLE_ROLES = new Set(["superadmin", "admin", "bursar", "operator"]);
 
@@ -71,8 +72,12 @@ export async function performSchoolUserAction({
     if (!displayName || displayName.length > 150 || !phone) {
       return { ok: false, status: 400, reason: "A name (up to 150 characters) and valid Uganda mobile number are required." };
     }
-  } else if (action === "reset_password" && String(values.password || "").length < 12) {
-    return { ok: false, status: 400, reason: "Password must be at least 12 characters." };
+  } else if (action === "reset_password") {
+    try {
+      await assertSchoolPassword(String(values.password || ""));
+    } catch (error) {
+      return { ok: false, status: error.status || 400, reason: error.message };
+    }
   } else if (action === "set_role") {
     if (!ASSIGNABLE_ROLES.has(values.role)) {
       return { ok: false, status: 400, reason: "Choose a valid school role." };

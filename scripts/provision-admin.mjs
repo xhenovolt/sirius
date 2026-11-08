@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import fs from "node:fs";
 import { getDb } from "../src/lib/db.js";
+import { assertSchoolPassword } from "../src/lib/schoolPassword.js";
 
 for (const line of fs.readFileSync(".env.local", "utf8").split(/\r?\n/)) {
   if (!line || line.startsWith("#") || !line.includes("=")) continue;
@@ -11,7 +12,8 @@ for (const line of fs.readFileSync(".env.local", "utf8").split(/\r?\n/)) {
 
 const email = process.env.SIRIUS_ADMIN_EMAIL?.trim().toLowerCase();
 const password = process.env.SIRIUS_ADMIN_PASSWORD;
-if (!email || !password || password.length < 12) throw new Error("Set SIRIUS_ADMIN_EMAIL and SIRIUS_ADMIN_PASSWORD (minimum 12 characters).");
+if (!email || !password) throw new Error("Set SIRIUS_ADMIN_EMAIL and SIRIUS_ADMIN_PASSWORD.");
+await assertSchoolPassword(password);
 
 const passwordHash = await bcrypt.hash(password, 12);
 const db = getDb();

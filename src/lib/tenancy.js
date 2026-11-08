@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { getDb } from "./db.js";
 import { scopeTenantConnection } from "./dbTenant.js";
+import { assertSchoolPassword } from "./schoolPassword.js";
 
 export const superAdminSlug = "superadmin";
 
@@ -64,6 +65,7 @@ export async function createSchoolWithSuperAdmin({
   displayName,
   phone = null,
 }) {
+  await assertSchoolPassword(password);
   const connection = await getDb().getConnection();
   try {
     await connection.beginTransaction();

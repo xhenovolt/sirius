@@ -7,6 +7,7 @@ import { recordAuditLog } from "./audit.js";
 import { assignRole, createSchoolWithSuperAdmin, findRoleId, superAdminSlug } from "./tenancy.js";
 import { checkCapacity } from "./entitlements.js";
 import { getLoginFailureReason } from "./loginFailure.js";
+import { assertSchoolPassword } from "./schoolPassword.js";
 import {
   normalizeUgandaPhone,
   passwordResetPhoneLookupValues,
@@ -151,6 +152,7 @@ function clientIp(request) {
  * from the caller's session, so a superadmin can only staff their own school.
  */
 export async function createUser({ schoolId, email, password, displayName, phone = "", roleSlug = "operator", createdBy = null }) {
+  await assertSchoolPassword(password);
   const normalizedPhone = normalizeUgandaPhone(phone);
   if (!normalizedPhone) {
     const error = new Error("A valid Uganda mobile number is required for password recovery.");
@@ -411,6 +413,7 @@ export async function requestPasswordReset(identifier) {
 }
 
 export async function resetPassword(identifier, code, password) {
+  await assertSchoolPassword(password);
   const { value, phone } = findIdentifier(identifier);
   const user = await findPasswordResetUser(value, phone);
   if (!user) return false;

@@ -1,8 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { useSchoolPasswordPolicy } from "@/components/SchoolPasswordPolicy";
+import { describeSchoolPasswordPolicy } from "@/lib/passwordPolicyRules";
 
 export default function UserCreateForm({ isSuperAdmin = false }) {
+  const { policy, loadError } = useSchoolPasswordPolicy();
   const [form, setForm] = useState({ displayName: "", email: "", phone: "", password: "", role: "operator" });
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -29,7 +32,9 @@ export default function UserCreateForm({ isSuperAdmin = false }) {
       <input placeholder="Full name" value={form.displayName} onChange={(event) => setForm({ ...form, displayName: event.target.value })} required />
       <input placeholder="Email" type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} required />
       <input placeholder="Uganda mobile number (for password recovery)" type="tel" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} required />
-      <input placeholder="Temporary password (12+ characters)" type="password" minLength="12" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} required />
+      <input placeholder="Temporary password" type="password" minLength={policy.minLength} value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} required />
+      <p className="settings-message">{describeSchoolPasswordPolicy(policy)}</p>
+      {loadError && <p className="settings-message">{loadError}</p>}
       <select value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value })}>
         <option value="operator">Operator</option>
         <option value="admin">Administrator</option>

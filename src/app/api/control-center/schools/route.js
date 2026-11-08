@@ -122,7 +122,7 @@ export async function POST(request) {
   const displayName = String(b?.admin_name || "").trim();
   if (!schoolName || schoolName.length > 200) return NextResponse.json({ error: "School name is required (max 200 chars)." }, { status: 400 });
   if (!displayName || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return NextResponse.json({ error: "A valid administrator name and email are required." }, { status: 400 });
-  if (password.length < 8) return NextResponse.json({ error: "Administrator password must be at least 8 characters." }, { status: 400 });
+  if (!password) return NextResponse.json({ error: "Administrator password is required." }, { status: 400 });
 
   try {
     const { schoolId, userId } = await createSchoolWithSuperAdmin({
@@ -137,6 +137,7 @@ export async function POST(request) {
     return NextResponse.json({ success: true, school_id: schoolId });
   } catch (error) {
     console.error("Provision school failed", error);
+    if (error.code === "INVALID_SCHOOL_PASSWORD") return NextResponse.json({ error: error.message }, { status: 400 });
     return NextResponse.json({ error: "Unable to provision school." }, { status: 500 });
   }
 }

@@ -4,6 +4,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { useControlAccess } from "@/components/control/ControlAccess";
 import { Loader2 } from "@/components/control/icons";
+import { useSchoolPasswordPolicy } from "@/components/SchoolPasswordPolicy";
+import { describeSchoolPasswordPolicy } from "@/lib/passwordPolicyRules";
 
 const SEV = {
   ok: "text-emerald-300 bg-emerald-500/10",
@@ -14,6 +16,7 @@ const SEV = {
 
 export default function SchoolsPage() {
   const { can } = useControlAccess();
+  const { policy, loadError: passwordPolicyLoadError } = useSchoolPasswordPolicy();
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [q, setQ] = useState("");
@@ -87,7 +90,8 @@ export default function SchoolsPage() {
           <input value={form.school_code} onChange={(e) => setForm({ ...form, school_code: e.target.value })} placeholder="School code (optional)" className={input} />
           <input value={form.admin_name} onChange={(e) => setForm({ ...form, admin_name: e.target.value })} placeholder="Administrator name" className={input} />
           <input value={form.admin_email} onChange={(e) => setForm({ ...form, admin_email: e.target.value })} placeholder="Administrator email" type="email" className={input} />
-          <input value={form.admin_password} onChange={(e) => setForm({ ...form, admin_password: e.target.value })} placeholder="Administrator password (min 8)" type="password" className={input} />
+          <input value={form.admin_password} onChange={(e) => setForm({ ...form, admin_password: e.target.value })} placeholder="Administrator password" type="password" minLength={policy.minLength} className={input} />
+          <p className="sm:col-span-2 text-xs text-slate-500">{describeSchoolPasswordPolicy(policy)}{passwordPolicyLoadError ? ` ${passwordPolicyLoadError}` : ""}</p>
           <div className="sm:col-span-2">
             <button onClick={provision} disabled={busy} className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-sm text-white disabled:opacity-50">
               {busy ? "Provisioning…" : "Create school + administrator"}

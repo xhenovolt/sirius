@@ -11,6 +11,20 @@ const target = {
   is_admin: 0,
 };
 
+mock.module("./control/platform-settings.js", {
+  exports: {
+    async getSchoolPasswordPolicy() {
+      return {
+        minLength: 6,
+        requireUppercase: false,
+        requireLowercase: false,
+        requireNumber: false,
+        requireSymbol: false,
+      };
+    },
+  },
+});
+
 mock.module("./dbTenant.js", {
   exports: {
     async queryTenant(schoolId, sql, params) {
@@ -40,6 +54,25 @@ test("school user lists exclude any retained legacy soft-deleted accounts", asyn
 
   assert.match(calls[0].sql, /u\.deleted_at IS NULL/);
   assert.deepEqual(calls[0].params, ["school-a"]);
+});
+
+test("school user password reset applies the current platform policy", async () => {
+  calls.length = 0;
+  const result = await performSchoolUserAction({
+    schoolId: "school-a",
+    actorId: 7,
+    actorIsSuperAdmin: true,
+    userId: 9,
+    action: "reset_password",
+    values: { password: "short" },
+  });
+
+  assert.deepEqual(result, {
+    ok: false,
+    status: 400,
+    reason: "Password must include at least 6 characters.",
+  });
+  assert.equal(calls.length, 0);
 });
 
 test("SuperAdmin can assign any seeded school role to another user", async () => {

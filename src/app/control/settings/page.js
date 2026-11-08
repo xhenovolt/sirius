@@ -21,16 +21,22 @@ export default function SettingsPage() {
 
   const load = useCallback(async () => {
     setError(null);
-    const r = await fetch("/api/control-center/settings", { cache: "no-store" });
-    const j = await r.json();
-    if (!r.ok) { setError(j.error || "Failed to load"); return; }
-    setData(j.settings);
-    setForm({
-      maintenance_mode: j.settings.maintenance.mode,
-      maintenance_message: j.settings.maintenance.message,
-      free_trial_days: j.settings.free_trial_days,
-      free_trial_card_limit: j.settings.free_trial_card_limit ?? "",
-    });
+    try {
+      const r = await fetch("/api/control-center/settings", { cache: "no-store" });
+      const j = await r.json();
+      if (!r.ok) { setError(j.error || "Failed to load"); return; }
+      setData(j.settings);
+      setForm({
+        maintenance_mode: j.settings.maintenance.mode,
+        maintenance_message: j.settings.maintenance.message,
+        free_trial_days: j.settings.free_trial_days,
+        free_trial_card_limit: j.settings.free_trial_card_limit ?? "",
+        school_password_policy: j.settings.school_password_policy,
+      });
+    } catch (loadError) {
+      console.error("Control settings load failed", loadError);
+      setError("Unable to load platform settings.");
+    }
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -44,12 +50,19 @@ export default function SettingsPage() {
           maintenance_message: form.maintenance_message,
           free_trial_days: form.free_trial_days,
           free_trial_card_limit: form.free_trial_card_limit === "" ? 0 : form.free_trial_card_limit,
+          school_password_policy: {
+            ...form.school_password_policy,
+            minLength: Number(form.school_password_policy.minLength),
+          },
         }),
       });
       const j = await r.json();
       if (!r.ok) { setError(j.error || "Failed to save"); return; }
       setData(j.settings);
       setSaved(true);
+    } catch (saveError) {
+      console.error("Control settings save failed", saveError);
+      setError("Unable to save platform settings.");
     } finally { setBusy(false); }
   }, [form]);
 
@@ -102,6 +115,48 @@ export default function SettingsPage() {
             <input value={form.free_trial_card_limit} disabled={!editable} onChange={(e) => setForm({ ...form, free_trial_card_limit: e.target.value })} type="number" min="0" className={input} />
           </label>
         </div>
+      </section>
+
+      <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 space-y-3">
+        <h2 className="font-semibold">School account password policy</h2>
+        <p className="text-xs text-slate-500">Applies to school sign-up, new school users, administrator resets, and self-service resets. Existing passwords remain valid until changed. Control Center operator passwords use a separate policy.</p>
+        <label className="text-xs text-slate-400 space-y-1 block max-w-xs">
+          Minimum length
+          <input
+            value={form.school_password_policy.minLength}
+            disabled={!editable}
+            onChange={(e) => setForm({
+              ...form,
+              school_password_policy: { ...form.school_password_policy, minLength: e.target.value },
+            })}
+            type="number"
+            min="6"
+            max="72"
+            className={input}
+          />
+        </label>
+        <div className="grid sm:grid-cols-2 gap-2">
+          {[
+            ["requireUppercase", "Require an uppercase letter"],
+            ["requireLowercase", "Require a lowercase letter"],
+            ["requireNumber", "Require a number"],
+            ["requireSymbol", "Require a symbol"],
+          ].map(([key, label]) => (
+            <label key={key} className="flex items-center gap-2 text-sm text-slate-300">
+              <input
+                type="checkbox"
+                checked={form.school_password_policy[key]}
+                disabled={!editable}
+                onChange={(e) => setForm({
+                  ...form,
+                  school_password_policy: { ...form.school_password_policy, [key]: e.target.checked },
+                })}
+              />
+              {label}
+            </label>
+          ))}
+        </div>
+        <p className="text-xs text-slate-500">The current default is six characters with no extra character-type requirements.</p>
       </section>
 
       {editable && (

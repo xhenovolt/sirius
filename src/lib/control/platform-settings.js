@@ -13,6 +13,7 @@
  * adds no per-request DB cost on the hot path.
  */
 import { query } from "./db.js";
+import { DEFAULT_SCHOOL_PASSWORD_POLICY, parseSchoolPasswordPolicy } from "../passwordPolicyRules.js";
 
 export const MAINTENANCE_MODES = ['off', 'banner', 'read_only'];
 
@@ -31,7 +32,24 @@ export async function setSetting(key, value) {
     `INSERT INTO platform_settings (key_name, value_text) VALUES (?, ?)
      ON DUPLICATE KEY UPDATE value_text = VALUES(value_text)`,
     [key, value],
-  ).catch(() => {});
+  );
+}
+
+export async function getSchoolPasswordPolicy() {
+  const raw = await getSetting("school_password_policy");
+  if (!raw) return { ...DEFAULT_SCHOOL_PASSWORD_POLICY };
+  try {
+    return parseSchoolPasswordPolicy(JSON.parse(raw)) || { ...DEFAULT_SCHOOL_PASSWORD_POLICY };
+  } catch {
+    return { ...DEFAULT_SCHOOL_PASSWORD_POLICY };
+  }
+}
+
+export async function setSchoolPasswordPolicy(policy) {
+  const parsed = parseSchoolPasswordPolicy(policy);
+  if (!parsed) throw new Error("Invalid school password policy.");
+  await setSetting("school_password_policy", JSON.stringify(parsed));
+  return parsed;
 }
 
 let cache = null;

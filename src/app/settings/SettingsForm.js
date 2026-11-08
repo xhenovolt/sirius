@@ -1,8 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { useSchoolPasswordPolicy } from "@/components/SchoolPasswordPolicy";
+import { describeSchoolPasswordPolicy } from "@/lib/passwordPolicyRules";
 
 export default function SettingsForm({ school, users, currentUserId, isSuperAdmin = false }) {
+  const { policy } = useSchoolPasswordPolicy();
   const [form, setForm] = useState({
     schoolName: school.school_name || "",
     schoolCode: school.school_code || "",
@@ -58,7 +61,7 @@ export default function SettingsForm({ school, users, currentUserId, isSuperAdmi
   }
 
   function resetPassword(user) {
-    const password = window.prompt(`New password for ${user.display_name} (at least 12 characters)`);
+    const password = window.prompt(`New password for ${user.display_name} (${describeSchoolPasswordPolicy(policy)})`);
     if (password === null) return;
     void userAction(
       user.id,

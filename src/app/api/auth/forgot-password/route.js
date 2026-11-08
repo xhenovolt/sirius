@@ -13,14 +13,15 @@ export async function POST(request) {
     }
     if (typeof body.identifier !== "string" || !body.identifier.trim()
       || !/^\d{6}$/.test(String(body.code || ""))
-      || typeof body.password !== "string" || body.password.length < 12) {
-      return NextResponse.json({ error: "Enter the six-digit code and a password of at least 12 characters." }, { status: 400 });
+      || typeof body.password !== "string" || !body.password) {
+      return NextResponse.json({ error: "Enter your email or phone, the six-digit code, and a new password." }, { status: 400 });
     }
     if (!(await resetPassword(body.identifier, body.code, body.password))) return NextResponse.json({ error: "Invalid or expired reset code." }, { status: 400 });
     await recordAuditLog({ request, action: "password_reset.completed", entityType: "user", entityId: body.identifier });
     return NextResponse.json({ reset: true });
   } catch (error) {
     console.error("Password reset failed", error);
+    if (error.code === "INVALID_SCHOOL_PASSWORD") return NextResponse.json({ error: error.message }, { status: 400 });
     return NextResponse.json({ error: "Unable to process password reset. Please try again." }, { status: 503 });
   }
 }

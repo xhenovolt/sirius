@@ -63,9 +63,9 @@ export async function POST(request) {
     const body = await request.json();
     if (typeof body.displayName !== "string" || !body.displayName.trim() || body.displayName.trim().length > 150
       || typeof body.email !== "string" || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(body.email.trim())
-      || typeof body.password !== "string" || body.password.length < 12
+      || typeof body.password !== "string" || !body.password
       || typeof body.phone !== "string" || !normalizeUgandaPhone(body.phone)) {
-      return NextResponse.json({ error: "A valid name, email, Uganda mobile number, and password of at least 12 characters are required." }, { status: 400 });
+      return NextResponse.json({ error: "A valid name, email, Uganda mobile number, and password are required." }, { status: 400 });
     }
     const role = body.role == null ? "operator" : body.role;
     if (typeof role !== "string" || !ASSIGNABLE_ROLES.has(role)) {
@@ -84,6 +84,7 @@ export async function POST(request) {
     console.error("Admin user creation failed", error);
     if (error.code === "PLAN_LIMIT_REACHED") return NextResponse.json({ error: error.message, code: error.code, limit: error.limit }, { status: error.status });
     if (error.code === "INVALID_USER_PHONE") return NextResponse.json({ error: error.message }, { status: 400 });
+    if (error.code === "INVALID_SCHOOL_PASSWORD") return NextResponse.json({ error: error.message }, { status: 400 });
     return NextResponse.json({ error: error.code === "ER_DUP_ENTRY" ? "An account with that email already exists." : "Unable to create user account." }, { status: error.code === "ER_DUP_ENTRY" ? 409 : 500 });
   }
 }
