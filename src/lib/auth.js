@@ -5,6 +5,7 @@ import { getDb } from "./db.js";
 import { queryTenant, withTenantTransaction } from "./dbTenant.js";
 import { assignRole, createSchoolWithSuperAdmin, findRoleId, superAdminSlug } from "./tenancy.js";
 import { checkCapacity } from "./entitlements.js";
+import { uniquePasswordResetUser } from "./passwordResetIdentity.js";
 
 const cookieName = "sirius_session";
 const sessionDays = 7;
@@ -291,7 +292,7 @@ async function findPasswordResetUser(value, phone) {
     "SELECT id, phone, school_id FROM users WHERE (email = ? OR phone = ?) AND status = 'active' AND deleted_at IS NULL LIMIT 2",
     [value, phone],
   );
-  return rows.length === 1 ? rows[0] : null;
+  return uniquePasswordResetUser(rows);
 }
 
 async function sendSms(phone, message) {

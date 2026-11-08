@@ -659,3 +659,10 @@ remediation commits were made as part of this audit.
   was not used for test fixtures.
 - Provider backup/restore drills and deployed-runtime verification remain
   unconfirmed.
+
+## 2026-11-08 — Password-reset ambiguity regression test
+
+- Extracted the unique-user decision into a small pure helper and added a
+  regression test for no match, one match, and cross-school ambiguity.
+- `npm.cmd test`: passed, 53 tests. `npm.cmd run build` and `git diff --check`
+  passed.
