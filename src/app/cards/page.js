@@ -11,6 +11,14 @@ import { hasSchoolPermission } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
+function cardStep(step, work) {
+  return Promise.resolve(work).catch((error) => {
+    const detail = error instanceof Error ? error : new Error(String(error), { cause: error });
+    detail.cardPreparationStep = step;
+    throw detail;
+  });
+}
+
 export default async function CardsPage() {
   const session = await getSession();
   if (!session) redirect("/login");
@@ -21,14 +29,17 @@ export default async function CardsPage() {
   let templates = [];
   let cardLimitReached = false;
   let databaseError = false;
+  let failingStep = "app_base_url";
   try {
     getAppBaseUrl();
     [students, school, templates] = await Promise.all([
-      getStudentsForCards(session.school_id),
-      getSchoolSettings(session.school_id),
-      listCardTemplates(session.school_id),
+      cardStep("student_query", getStudentsForCards(session.school_id)),
+      cardStep("school_settings_query", getSchoolSettings(session.school_id)),
+      cardStep("card_templates_query", listCardTemplates(session.school_id)),
     ]);
+    failingStep = "qr_identity_issuance";
     const identities = await issueIdentitiesForStudents(session.school_id, students.map((student) => student.id));
+    failingStep = "verification_url_build";
     const studentsWithCards = [];
     for (const student of students) {
       const identity = identities[String(student.id)];
@@ -42,7 +53,13 @@ export default async function CardsPage() {
     students = studentsWithCards;
     return renderCardsPage({ session, students, school, cardLimitReached, databaseError, templates, canManageTemplates });
   } catch (error) {
-    console.error("Card records load failed", error);
+    const detail = error instanceof Error ? error : new Error(String(error));
+    console.error("Card preparation failed", {
+      step: detail.cardPreparationStep || failingStep,
+      errorClass: detail.constructor.name,
+      errorCode: typeof detail.code === "string" ? detail.code : null,
+      errorMessage: detail.message,
+    });
     databaseError = true;
   }
 

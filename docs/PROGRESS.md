@@ -759,3 +759,139 @@ remediation commits were made as part of this audit.
 - Added policy guidance to school-facing password forms and corresponding
   validation tests. Policy writes now surface database errors rather than
   reporting a false successful save.
+
+## 2026-11-08 — Phase A: diagnose `/cards` preparation failure
+
+### Goal and scope
+
+- Investigation only: trace card preparation, reproduce the observed error,
+  compare the configured TiDB schema with repository migrations, and report
+  the remaining production-only checks. No functional fix has been applied.
+- Added temporary structured server logging in `src/app/cards/page.js`.
+  It records the failing step, error class, code, and message, but not request
+  secrets, tenant IDs, SQL parameters, or QR tokens. The browser continues to
+  receive the same generic message.
+
+### Trace and confirmed root cause
+
+- `CardsPage` resolves the school session and `cards.view` permission before
+  entering its preparation `try` block. Inside the `try`, its first operation
+  is `getAppBaseUrl()`, before any student/settings/template query, capacity
+  read, token issuance, or client QR generation.
+- The server log supplied during this investigation reports
+  `step: "app_base_url"` and `APP_BASE_URL is not configured.` This confirms
+  that the process producing that log has no usable `APP_BASE_URL`; that is
+  the immediate cause of its `/cards` error. The environment supplying the log
+  has not been independently identified as the Vercel Production project.
+- Locally, `.env.local` also has no `APP_BASE_URL`. Calling the first
+  preparation step reproduces the same `Error` and message. The configured
+  TiDB is reachable, has 13 active students, and can serve the card-page
+  student, school, and template reads. Its current card capacity is 120 with
+  zero active identities; `checkCapacity(..., "cards")` allows issuance.
+- Because the URL check runs first, the observed failing request never reaches
+  TiDB or token insertion. The generic catch was hiding that ordering and
+  previously logged an unstructured error object; the temporary structured log
+  now exposes the failing step without exposing credentials or tokens.
+
+### Hypothesis results
+
+| Hypothesis | Result | Evidence |
+|---|---|---|
+| H1 — Vercel `APP_BASE_URL` / `TIDB_*` configuration | **CONFIRMED for the process in the supplied log**: `APP_BASE_URL` is absent. **Vercel settings themselves remain unverified.** | The supplied log identifies the exact missing variable. Local `TIDB_HOST`, `TIDB_PORT`, `TIDB_USER`, `TIDB_PASSWORD`, and `TIDB_DB` are present and a read-only TiDB connection succeeds. Vercel CLI is authenticated as `xhenonpro`, but the accessible project list has no Sirius project and this checkout has no `.vercel` project link. |
+| H2 — missing `school_id` in a session | **RULED OUT for the supplied failure.** | Session resolution and the cards-permission gate happen before the logged `app_base_url` step. A cookie without a matching tenant-scoped session returns no session and redirects before this catch. The local DB contains a school and active users/sessions with matching tenant IDs. |
+| H3 — production DB behind migrations | **UNVERIFIABLE for Vercel Production; ruled out for the configured local TiDB.** | The configured TiDB has all 15 repository migrations recorded and the required card, school, student, plan, setting, and session tables. The local database cannot be proven to be the database used by Vercel. The request in the supplied log fails before any DB access. |
+| H4 — `checkCapacity` / plan configuration | **RULED OUT locally and for the supplied request.** | Local capacity is 120/0 and permits issuance. The cards flow fails at the earlier URL check. Capacity reads default open when plan/settings are absent or unreadable; that behavior does not produce this configuration exception. Production plan state is not independently checked. |
+| H5 — TiDB TLS, pooling, or serverless connections | **RULED OUT locally; UNVERIFIABLE in Vercel.** | The configured TiDB accepts the current TLS 1.2 connection and scoped reads. The module uses one pool per process with a limit of 10 connections; serverless-wide connection pressure remains an operational risk, but it is not the observed failing step. |
+| H6 — Vercel ephemeral filesystem | **RULED OUT for this failure path.** | Card preparation does not write files. Photo/logo uploads use Cloudinary, and no local filesystem write calls were found in `src/`. Those upload integrations are independent of card generation. |
+| H7 — Next.js 16 API/runtime misuse | **RULED OUT by current code/build for this failure.** | `cookies()` and dynamic route `params` are awaited; the cards page has no Edge runtime override; Node crypto is used in server-side code and QR rendering is in a Client Component. The production build passes. The observed error is thrown by the explicit URL check. |
+| H8 — QR schema constraints or no students | **RULED OUT as the immediate cause; insertion constraints were not exercised.** | Local TiDB has 13 active students. `qr_identities.school_id` and `student_id` are NOT NULL, the token column holds the generated 43-character token, and `public_token` is globally unique. There are currently zero active QR identities because the earlier URL failure prevents issuance. No test token was inserted into the configured database. |
+
+### APP_BASE_URL behavior and transfer/offline implications
+
+- `getAppBaseUrl()` reads only `process.env.APP_BASE_URL`; it has no Vercel
+  hostname fallback. Missing configuration throws the exact exception above.
+- It strips an optional HTTP(S) scheme and trailing slashes, accepts a
+  hostname/optional-port shape, and always emits `https://`. It rejects paths,
+  but currently accepts `localhost` and invalid numeric ports (for example
+  `99999`); it does not enforce production HTTPS input or verify a canonical
+  domain. The QR builder correctly emits `/v/{opaque_token}` and the URL
+  builder tests cover the standard hostname and path rejection.
+- The QR contract requires an absolute HTTPS link to the live record, so a
+  public base URL is inherently required when rendering a scannable card.
+  Printed cards work as physical cards offline, but live verification cannot:
+  scanning requires network access to the active Sirius domain. If the
+  deployment domain changes, newly generated QR links can use the new
+  hostname, but already-printed cards still point at the old hostname. Keep
+  the old domain redirecting to `/v/{token}` or reprint those cards.
+- The immediate minimal production unblock is to configure the Production
+  environment variable `APP_BASE_URL` as the public hostname
+  `sirius-psi-three.vercel.app` and redeploy. This does not yet solve local
+  hostname validation or domain migration policy; those need a deliberate
+  follow-up choice. No setting or source-code fix has been applied in this
+  investigation phase.
+
+### Golden-path status (code evidence, not production smoke-tested)
+
+| Step | Existing implementation | Gap / acceptance before calling it working |
+|---|---|---|
+| 1. Admin login and tenant | School sessions are tenant-scoped; the local DB has active users and sessions. | No production login was performed, and the accessible Vercel scope does not expose the Sirius project. Verify an actual school-admin login and tenant. |
+| 2. Import/review sample spreadsheet | Deterministic suggestions, staged-row editing, old/new field diffs, row/field decisions, and transactional commit exist. | Tested the requested headers. `class`, `stream`, `fees balance`, and `photo` map; `hometel` is only a data-shape suggestion. `account number` is only a data-shape suggestion. `full name` does not provide required `first_name`/`last_name`; `father`, `stdtype`, and `status` do not map. Clarify what `stdtype` and `status` mean before mapping them. Acceptance: upload the sample, confirm mapping, review the actual diff, accept selected changes, and verify commit. |
+| 3. Student listing/edit | Tenant-scoped listing/profile and optimistic-version student editing with server validation/audit are implemented and covered by tests. | Verify the committed sample rows appear and an edit persists in the deployed DB with a stale-version conflict tested. |
+| 4. Card generation/designer | Opaque 256-bit tokens, stable token reuse, capacity checks, layout fields/toggles, and fee-free card templates are implemented. | Currently blocked by absent `APP_BASE_URL` in the server process from the supplied log. Local DB contains no active identities. After config is fixed, verify QR contents and that fees never render. |
+| 5. Scan/verification | Unit tests cover same-school full records, public allowlisted fields, clearance, and indistinguishable invalid/unknown/revoked results. | No live token has been issued in the configured DB, so deployed scan behavior is unverified. Test both a logged-in same-school verifier and public/bad-token requests. |
+| 6. Print/PDF | Browser print and print-specific CSS exist. | No real-browser print/PDF smoke test has been performed. Verify card size, QR scannability, and that controls/fee balance are absent from print. |
+
+### Gated next work (not started)
+
+1. **Phase B1 — unblock configuration:** after approval, set and validate the
+   canonical production URL and test card issuance without exposing token
+   values. Acceptance: `/cards` renders all eligible students, persisted
+   identities are reused on refresh, and QR URLs target the live `/v/{token}`
+   route. Decide whether local development uses an explicit local URL or a
+   trusted request origin; do not blindly trust arbitrary `Host` headers.
+2. **Phase B2 — prevent opaque failures:** classify CONFIG, DATABASE,
+   TENANT/SESSION, ENTITLEMENT, STORAGE, and UNEXPECTED errors; retain safe
+   browser messages and add request-correlated server logs. Add startup/first
+   use config validation and tests for missing, malformed, localhost, and
+   production URL cases.
+3. **Phase B3 — close the golden-path import gap:** confirm the intended
+   semantics of `stdtype` and `status`, then implement/test the sample
+   `full name`, `father`, `hometel`, and other approved mappings. Acceptance:
+   stage, diff, selectively accept, commit, and verify the imported values.
+4. **Phase B4 — release safeguards:** protected health diagnostics, migration
+   version verification, safe entitlement fallback coverage, and a production
+   smoke script/checklist. Do not add Control Center product features.
+5. **Phase C — production golden path:** run the six manual acceptance steps
+   above against the actual Vercel deployment and production DB; retain old
+   domain redirects or reprint cards if the domain changes.
+
+### Production-only evidence still needed
+
+- The supplied log confirms the emitting server process lacks `APP_BASE_URL`.
+  To independently verify Vercel Production, open the Vercel team/project
+  that owns `sirius-psi-three.vercel.app` → **Settings → Environment
+  Variables** and check only whether `APP_BASE_URL` exists for **Production**
+  (do not share its value if it is sensitive). Also confirm the Production
+  deployment was redeployed after the variable was set.
+- In the same project, verify `TIDB_HOST`, `TIDB_PORT`, `TIDB_USER`,
+  `TIDB_PASSWORD`, and `TIDB_DB` are present in Production without sharing
+  values. From an authorized production DB connection, report only the
+  migration count/latest migration name and presence of required tables; do
+  not run fixtures or mutate QR rows.
+- Production QR issuance, printing, and verification require an authorized
+  school-admin session and a safe sample import; they cannot be proven from
+  this workspace.
+
+### Verification
+
+- Read-only local TiDB checks: 15/15 migrations, all required tables present,
+  13 active students, card capacity allows issuance, and card data/settings/
+  template queries succeed. No QR identity was inserted.
+- Local reproduction emitted the same structured `app_base_url` error as the
+  supplied server log. Domain-only, scheme-prefixed, trailing-slash, localhost,
+  invalid-port, and path input cases were checked; current validation accepts
+  localhost and the invalid port.
+- `npm.cmd test`: passed, 70 tests.
+- `npm.cmd run build`: passed; `/cards` compiled in the production route build.
+- `git diff --check`: passed. Phase A report and diagnostic logging are ready
+  for commit; no functional fix has been made.
