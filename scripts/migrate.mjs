@@ -19,6 +19,25 @@ const migrationsDir = path.join("database", "migrations");
 const files = (await fs.readdir(migrationsDir)).filter((file) => file.endsWith(".sql")).sort();
 
 async function checkStudentUidMigrationPreconditions(connection, file) {
+  if (file === "013_password_reset_tenant.sql") {
+    const [columns] = await connection.query("SHOW COLUMNS FROM password_reset_codes");
+    const hasSchoolId = columns.some((column) => column.Field === "school_id");
+    const [[orphaned]] = await connection.query(`
+      SELECT COUNT(*) AS count
+        FROM password_reset_codes p
+        LEFT JOIN users u ON u.id = p.user_id
+       WHERE u.id IS NULL
+          OR u.school_id IS NULL
+          ${hasSchoolId ? "OR (p.school_id IS NOT NULL AND p.school_id <> u.school_id)" : ""}
+    `);
+    if (Number(orphaned.count) > 0) {
+      throw new Error(
+        `Cannot apply ${file}: ${orphaned.count} password reset row(s) have no matching user school.`,
+      );
+    }
+    return;
+  }
+
   if (file === "006_student_core.sql") {
     const [columns] = await connection.query("SHOW COLUMNS FROM students");
     const columnNames = new Set(columns.map((column) => column.Field));
@@ -76,6 +95,29 @@ async function checkStudentUidMigrationPreconditions(connection, file) {
 }
 
 async function applyMigration(connection, file) {
+  if (file === "013_password_reset_tenant.sql") {
+    await connection.query(await fs.readFile(path.join(migrationsDir, file), "utf8"));
+    const [indexes] = await connection.query("SHOW INDEX FROM password_reset_codes");
+    if (!indexes.some((index) => index.Key_name === "password_reset_school_user_index")) {
+      await connection.query(
+        "ALTER TABLE password_reset_codes ADD KEY password_reset_school_user_index (school_id, user_id, created_at)",
+      );
+    }
+    const [constraints] = await connection.query(`
+      SELECT constraint_name
+        FROM information_schema.table_constraints
+       WHERE table_schema = DATABASE()
+         AND table_name = 'password_reset_codes'
+         AND constraint_name = 'password_reset_school_fk'
+    `);
+    if (!constraints.length) {
+      await connection.query(
+        "ALTER TABLE password_reset_codes ADD CONSTRAINT password_reset_school_fk FOREIGN KEY (school_id) REFERENCES schools (school_id)",
+      );
+    }
+    return;
+  }
+
   if (file === "006_student_core.sql") {
     const [studentColumns] = await connection.query("SHOW COLUMNS FROM students");
     const studentColumnNames = new Set(studentColumns.map((column) => column.Field));

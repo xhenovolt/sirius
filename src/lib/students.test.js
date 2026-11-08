@@ -31,7 +31,7 @@ const fakeExecutor = {
 // stay dynamic: a static import would pull the real db.js in first.
 mock.module("./db.js", { exports: { getDb: () => fakeExecutor } });
 
-const { assertTenantId, assertTenantSafe, queryTenant } = await import("./dbTenant.js");
+const { assertTenantId, assertTenantSafe, queryTenant, scopeTenantConnection } = await import("./dbTenant.js");
 const { searchStudents, getStudentByUid } = await import("./students.js");
 
 test("the tenant guard is fail-closed", () => {
@@ -48,6 +48,24 @@ test("queryTenant rejects SQL without school_id before reaching the database", a
     /UNSAFE QUERY/,
   );
   assert.equal(calls.length, 0);
+});
+
+test("scopeTenantConnection rejects unscoped SQL and binds accepted tenant SQL", async () => {
+  const connectionCalls = [];
+  const scoped = scopeTenantConnection({
+    query(sql, params) {
+      connectionCalls.push({ sql, params });
+      return Promise.resolve([{ affectedRows: 1 }]);
+    },
+  }, "sch_a");
+
+  assert.throws(() => scoped.query("DELETE FROM sessions WHERE id = ?", [1]), /UNSAFE QUERY/);
+  assert.equal(connectionCalls.length, 0);
+  await scoped.query("DELETE FROM sessions WHERE id = ? AND school_id = ?", [1, "sch_a"]);
+  assert.deepEqual(connectionCalls, [{
+    sql: "DELETE FROM sessions WHERE id = ? AND school_id = ?",
+    params: [1, "sch_a"],
+  }]);
 });
 
 test("searchStudents returns only the calling school's rows", async () => {

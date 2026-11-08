@@ -630,3 +630,32 @@ remediation commits were made as part of this audit.
 - `npm.cmd run test:integration` correctly stopped before connecting because
   no `.env.test.local` test database is configured. Therefore the database
   assertions remain unrun; this harness does not use or mutate `.env.local`.
+
+## 2026-11-08 — Tenant-scope school authentication writes
+
+### Done
+
+- Added migration 013 to attach password-reset codes to their owner's school,
+  backfill existing rows, and add a school-scoped lookup index and foreign key.
+- Scoped session writes, password-reset operations, and transactional school
+  provisioning to the server-resolved school. Tenant transaction callbacks
+  now receive only the scoped query interface.
+- Password reset lookup now refuses ambiguous identifiers rather than
+  selecting an arbitrary user when an email/phone collision exists.
+- Updated the baseline schema and auth cleanup/integration fixture paths.
+
+### Verification
+
+- Read-only TiDB preflight found no orphaned or mismatched reset-code owners.
+- Applied migration 013; verified its ledger entry, non-null `school_id`,
+  scoped index, school foreign key, and zero mismatched rows.
+- `npm.cmd test`: passed, 52 tests. `npm.cmd run build`: passed.
+- Migration/auth script syntax checks and `git diff --check`: passed.
+
+### Next / known issues
+
+- The real two-school integration suite is still blocked until a separate,
+  disposable TiDB target is configured in `.env.test.local`; production TiDB
+  was not used for test fixtures.
+- Provider backup/restore drills and deployed-runtime verification remain
+  unconfirmed.

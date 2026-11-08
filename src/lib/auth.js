@@ -2,6 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { cookies } from "next/headers";
 import { getDb } from "./db.js";
+import { queryTenant, withTenantTransaction } from "./dbTenant.js";
 import { assignRole, createSchoolWithSuperAdmin, findRoleId, superAdminSlug } from "./tenancy.js";
 import { checkCapacity } from "./entitlements.js";
 
@@ -65,6 +66,7 @@ const sessionSelect = `
   FROM sessions s
   JOIN users u ON u.id = s.user_id
   WHERE s.token_hash = ?
+    AND s.school_id = u.school_id
     AND s.expires_at > CURRENT_TIMESTAMP
     AND s.is_active = 1
     AND u.status = 'active'
@@ -91,13 +93,15 @@ function shapeSession(row) {
  * at all while the session was seen recently. This is what makes "online"
  * cheap and what "active" (account enabled) stays independent from.
  */
-async function touchSession(sessionId) {
-  await getDb().query(
+async function touchSession(sessionId, schoolId) {
+  await queryTenant(
+    schoolId,
     `UPDATE sessions
         SET last_seen_at = CURRENT_TIMESTAMP
       WHERE id = ?
+        AND school_id = ?
         AND last_seen_at < DATE_SUB(CURRENT_TIMESTAMP, INTERVAL ? SECOND)`,
-    [sessionId, heartbeatSeconds],
+    [sessionId, schoolId, heartbeatSeconds],
   );
 }
 
@@ -113,7 +117,8 @@ async function setSessionCookie(token, expiresAt) {
 
 async function insertSession(userId, schoolId, token, request) {
   const expiresAt = new Date(Date.now() + sessionDays * 24 * 60 * 60 * 1000);
-  await getDb().query(
+  await queryTenant(
+    schoolId,
     `INSERT INTO sessions (user_id, school_id, token_hash, expires_at, ip_address, user_agent)
      VALUES (?, ?, ?, ?, ?, ?)`,
     [
@@ -154,15 +159,18 @@ export async function createUser({ schoolId, email, password, displayName, phone
   // user_roles. It is an ENUM('admin','operator'), so map anything non-operator
   // (admin, bursar, superadmin) to 'admin'.
   const legacyRole = roleSlug === "operator" ? "operator" : "admin";
-  const [result] = await getDb().query(
-    `INSERT INTO users (school_id, email, phone, display_name, password_hash, role, status, created_by)
-     VALUES (?, ?, ?, ?, ?, ?, 'active', ?)`,
-    [schoolId, String(email).toLowerCase(), phone, displayName, passwordHash, legacyRole, createdBy],
-  );
-  const userId = result.insertId;
-  const roleId = await findRoleId(getDb(), schoolId, roleSlug);
-  if (roleId) await assignRole(getDb(), { userId, roleId, schoolId, assignedBy: createdBy });
-  return { userId, roleId };
+  return withTenantTransaction(schoolId, async (scoped) => {
+    const [result] = await scoped.query(
+      `INSERT INTO users (school_id, email, phone, display_name, password_hash, role, status, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, 'active', ?)`,
+      [schoolId, String(email).toLowerCase(), phone, displayName, passwordHash, legacyRole, createdBy],
+    );
+    const userId = result.insertId;
+    const roleId = await findRoleId(scoped, schoolId, roleSlug);
+    if (!roleId) throw new Error(`School role "${roleSlug}" is not configured.`);
+    await assignRole(scoped, { userId, roleId, schoolId, assignedBy: createdBy });
+    return { userId, roleId };
+  });
 }
 
 export async function authenticate(email, password, request) {
@@ -179,7 +187,11 @@ export async function authenticate(email, password, request) {
 
   const token = newSessionToken();
   const expiresAt = await insertSession(user.id, user.school_id, token, request);
-  await getDb().query("UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?", [user.id]);
+  await queryTenant(
+    user.school_id,
+    "UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ? AND school_id = ?",
+    [user.id, user.school_id],
+  );
   await setSessionCookie(token, expiresAt);
 
   const session = await getSession();
@@ -212,7 +224,7 @@ export async function getSession() {
   const [rows] = await getDb().query(sessionSelect, [hashToken(token)]);
   const session = shapeSession(rows[0]);
   if (!session) return null;
-  await touchSession(rows[0].sessionId);
+  await touchSession(rows[0].sessionId, session.school_id);
   return session;
 }
 
@@ -234,17 +246,31 @@ export async function requireSchoolAdmin() {
 export async function destroySession() {
   const jar = await cookies();
   const token = jar.get(cookieName)?.value;
-  if (token) await getDb().query("DELETE FROM sessions WHERE token_hash = ?", [hashToken(token)]);
+  if (token) {
+    const session = await getSession();
+    if (session) {
+      await queryTenant(
+        session.school_id,
+        "DELETE FROM sessions WHERE token_hash = ? AND school_id = ?",
+        [hashToken(token), session.school_id],
+      );
+    }
+  }
   jar.delete(cookieName);
 }
 
-export async function cleanupAuthArtifacts() {
-  await getDb().query("DELETE FROM sessions WHERE expires_at <= CURRENT_TIMESTAMP");
-  await getDb().query("DELETE FROM password_reset_codes WHERE expires_at <= CURRENT_TIMESTAMP OR used_at IS NOT NULL");
+export async function cleanupAuthArtifacts(schoolId) {
+  await withTenantTransaction(schoolId, async (scoped) => {
+    await scoped.query("DELETE FROM sessions WHERE school_id = ? AND expires_at <= CURRENT_TIMESTAMP", [schoolId]);
+    await scoped.query(
+      "DELETE FROM password_reset_codes WHERE school_id = ? AND (expires_at <= CURRENT_TIMESTAMP OR used_at IS NOT NULL)",
+      [schoolId],
+    );
+  });
 }
 
-export async function terminateUserSessions(userId) {
-  await getDb().query("DELETE FROM sessions WHERE user_id = ?", [userId]);
+export async function terminateUserSessions(userId, schoolId) {
+  await queryTenant(schoolId, "DELETE FROM sessions WHERE user_id = ? AND school_id = ?", [userId, schoolId]);
 }
 
 function normalizePhone(phone) {
@@ -258,6 +284,14 @@ function normalizePhone(phone) {
 function findIdentifier(identifier) {
   const value = String(identifier || "").trim().toLowerCase();
   return { value, phone: normalizePhone(value) || value };
+}
+
+async function findPasswordResetUser(value, phone) {
+  const [rows] = await getDb().query(
+    "SELECT id, phone, school_id FROM users WHERE (email = ? OR phone = ?) AND status = 'active' AND deleted_at IS NULL LIMIT 2",
+    [value, phone],
+  );
+  return rows.length === 1 ? rows[0] : null;
 }
 
 async function sendSms(phone, message) {
@@ -286,53 +320,69 @@ function codesMatch(supplied, storedHash) {
 
 export async function requestPasswordReset(identifier) {
   const { value, phone } = findIdentifier(identifier);
-  const [rows] = await getDb().query(
-    "SELECT id, phone FROM users WHERE (email = ? OR phone = ?) AND status = 'active' AND deleted_at IS NULL LIMIT 1",
-    [value, phone],
-  );
-  if (!rows[0]) return;
-
-  // Rate limit: at most one live request per user per minute.
-  const [recent] = await getDb().query(
-    `SELECT id FROM password_reset_codes
-      WHERE user_id = ? AND used_at IS NULL
-        AND created_at > DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 60 SECOND)
-      LIMIT 1`,
-    [rows[0].id],
-  );
-  if (recent[0]) return;
+  const user = await findPasswordResetUser(value, phone);
+  if (!user) return;
 
   const code = generateResetCode();
-  await getDb().query("UPDATE password_reset_codes SET used_at = CURRENT_TIMESTAMP WHERE user_id = ? AND used_at IS NULL", [rows[0].id]);
-  await getDb().query(
-    `INSERT INTO password_reset_codes (user_id, code_hash, expires_at)
-     VALUES (?, ?, DATE_ADD(CURRENT_TIMESTAMP, INTERVAL ? MINUTE))`,
-    [rows[0].id, hashToken(code), resetCodeMinutes],
-  );
-  await sendSms(rows[0].phone, `Sirius by Xhenvolt: your password reset code is ${code}. It expires in ${resetCodeMinutes} minutes.`);
+  const created = await withTenantTransaction(user.school_id, async (scoped) => {
+    await scoped.query("SELECT id FROM users WHERE id = ? AND school_id = ? FOR UPDATE", [user.id, user.school_id]);
+    const [recent] = await scoped.query(
+      `SELECT id FROM password_reset_codes
+        WHERE school_id = ? AND user_id = ? AND used_at IS NULL
+          AND created_at > DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 60 SECOND)
+        LIMIT 1`,
+      [user.school_id, user.id],
+    );
+    if (recent[0]) return false;
+    await scoped.query(
+      "UPDATE password_reset_codes SET used_at = CURRENT_TIMESTAMP WHERE school_id = ? AND user_id = ? AND used_at IS NULL",
+      [user.school_id, user.id],
+    );
+    await scoped.query(
+      `INSERT INTO password_reset_codes (school_id, user_id, code_hash, expires_at)
+       VALUES (?, ?, ?, DATE_ADD(CURRENT_TIMESTAMP, INTERVAL ? MINUTE))`,
+      [user.school_id, user.id, hashToken(code), resetCodeMinutes],
+    );
+    return true;
+  });
+  if (!created) return;
+  await sendSms(user.phone, `Sirius by Xhenvolt: your password reset code is ${code}. It expires in ${resetCodeMinutes} minutes.`);
 }
 
 export async function resetPassword(identifier, code, password) {
   const { value, phone } = findIdentifier(identifier);
-  const [users] = await getDb().query(
-    "SELECT id FROM users WHERE (email = ? OR phone = ?) AND status = 'active' AND deleted_at IS NULL LIMIT 1",
-    [value, phone],
-  );
-  if (!users[0]) return false;
-  const [codes] = await getDb().query(
-    `SELECT id, code_hash, attempts FROM password_reset_codes
-      WHERE user_id = ? AND used_at IS NULL AND expires_at > CURRENT_TIMESTAMP
-      ORDER BY created_at DESC LIMIT 1`,
-    [users[0].id],
-  );
-  const reset = codes[0];
-  if (!reset || reset.attempts >= 5) return false;
-  await getDb().query("UPDATE password_reset_codes SET attempts = attempts + 1 WHERE id = ?", [reset.id]);
-  if (!codesMatch(String(code).trim(), reset.code_hash)) return false;
-
+  const user = await findPasswordResetUser(value, phone);
+  if (!user) return false;
   const passwordHash = await bcrypt.hash(password, 12);
-  await getDb().query("UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", [passwordHash, users[0].id]);
-  await getDb().query("UPDATE password_reset_codes SET used_at = CURRENT_TIMESTAMP WHERE id = ?", [reset.id]);
-  await terminateUserSessions(users[0].id);
-  return true;
+  return withTenantTransaction(user.school_id, async (scoped) => {
+    const [activeUsers] = await scoped.query(
+      "SELECT id FROM users WHERE id = ? AND school_id = ? AND status = 'active' AND deleted_at IS NULL FOR UPDATE",
+      [user.id, user.school_id],
+    );
+    if (!activeUsers[0]) return false;
+    const [codes] = await scoped.query(
+      `SELECT id, code_hash, attempts FROM password_reset_codes
+        WHERE school_id = ? AND user_id = ? AND used_at IS NULL AND expires_at > CURRENT_TIMESTAMP
+        ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
+      [user.school_id, user.id],
+    );
+    const reset = codes[0];
+    if (!reset || reset.attempts >= 5) return false;
+    await scoped.query(
+      "UPDATE password_reset_codes SET attempts = attempts + 1 WHERE id = ? AND school_id = ?",
+      [reset.id, user.school_id],
+    );
+    if (!codesMatch(String(code).trim(), reset.code_hash)) return false;
+
+    await scoped.query(
+      "UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND school_id = ?",
+      [passwordHash, user.id, user.school_id],
+    );
+    await scoped.query(
+      "UPDATE password_reset_codes SET used_at = CURRENT_TIMESTAMP WHERE id = ? AND school_id = ?",
+      [reset.id, user.school_id],
+    );
+    await scoped.query("DELETE FROM sessions WHERE user_id = ? AND school_id = ?", [user.id, user.school_id]);
+    return true;
+  });
 }

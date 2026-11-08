@@ -44,23 +44,28 @@ export async function queryTenantOne(schoolId, sql, params = []) {
   return rows[0] || null;
 }
 
+/** Bind an existing connection to one tenant, for atomic provisioning flows. */
+export function scopeTenantConnection(connection, schoolId) {
+  assertTenantId(schoolId);
+  return {
+    query(sql, params = []) {
+      assertTenantSafe(sql, schoolId);
+      return connection.query(sql, params);
+    },
+  };
+}
+
 /**
  * Run a unit of work inside a transaction where every statement is scoped.
- * The callback receives `{ query }`; the raw connection is passed second so
- * callers can use escape-free helpers when they truly need an unscoped read.
+ * The callback receives only the tenant-bound query interface.
  */
 export async function withTenantTransaction(schoolId, work) {
   assertTenantId(schoolId);
   const connection = await getDb().getConnection();
   try {
     await connection.beginTransaction();
-    const scoped = {
-      query(sql, params = []) {
-        assertTenantSafe(sql, schoolId);
-        return connection.query(sql, params);
-      },
-    };
-    const result = await work(scoped, connection);
+    const scoped = scopeTenantConnection(connection, schoolId);
+    const result = await work(scoped);
     await connection.commit();
     return result;
   } catch (error) {

@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { getDb } from "./db.js";
+import { scopeTenantConnection } from "./dbTenant.js";
 
 export const superAdminSlug = "superadmin";
 
@@ -68,23 +69,25 @@ export async function createSchoolWithSuperAdmin({
     await connection.beginTransaction();
 
     const schoolId = generateSchoolId();
-    await connection.query(
+    const scoped = scopeTenantConnection(connection, schoolId);
+    await scoped.query(
       "INSERT INTO schools (school_id, school_name, school_code, status) VALUES (?, ?, ?, 'active')",
       [schoolId, schoolName, schoolCode],
     );
 
-    await seedSchoolRoles(connection, schoolId);
+    await seedSchoolRoles(scoped, schoolId);
 
     const passwordHash = await bcrypt.hash(password, 12);
-    const [userResult] = await connection.query(
+    const [userResult] = await scoped.query(
       `INSERT INTO users (school_id, email, phone, display_name, password_hash, role, status)
        VALUES (?, ?, ?, ?, ?, 'admin', 'active')`,
       [schoolId, String(email).toLowerCase(), phone || "", displayName, passwordHash],
     );
     const userId = userResult.insertId;
 
-    const superAdminRoleId = await findRoleId(connection, schoolId, superAdminSlug);
-    await assignRole(connection, { userId, roleId: superAdminRoleId, schoolId });
+    const superAdminRoleId = await findRoleId(scoped, schoolId, superAdminSlug);
+    if (!superAdminRoleId) throw new Error("School SuperAdmin role could not be initialized.");
+    await assignRole(scoped, { userId, roleId: superAdminRoleId, schoolId });
 
     await connection.commit();
     return { schoolId, userId };

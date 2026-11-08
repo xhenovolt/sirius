@@ -83,6 +83,7 @@ async function removeFixtures(connection, schoolIds) {
     "import_mapping_templates",
     "card_templates",
     "sessions",
+    "password_reset_codes",
     "audit_logs",
     "user_roles",
     "students",

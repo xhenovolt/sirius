@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE TABLE IF NOT EXISTS password_reset_codes (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  school_id VARCHAR(64) NOT NULL,
   user_id BIGINT UNSIGNED NOT NULL,
   code_hash CHAR(64) NOT NULL,
   expires_at TIMESTAMP NOT NULL,
@@ -45,9 +46,10 @@ CREATE TABLE IF NOT EXISTS password_reset_codes (
   attempts TINYINT UNSIGNED NOT NULL DEFAULT 0,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
-  KEY password_reset_user_index (user_id),
+  KEY password_reset_school_user_index (school_id, user_id, created_at),
   KEY password_reset_expiry_index (expires_at),
-  CONSTRAINT password_reset_user_fk FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+  CONSTRAINT password_reset_user_fk FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+  CONSTRAINT password_reset_school_fk FOREIGN KEY (school_id) REFERENCES schools (school_id)
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
