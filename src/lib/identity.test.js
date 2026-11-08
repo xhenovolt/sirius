@@ -111,7 +111,18 @@ test("buildScanUrl emits an https /v/{token} URL", () => {
   assert.equal(getAppBaseUrl("https://sirius.example.com/"), "https://sirius.example.com");
   assert.equal(buildScanUrl(token, "sirius.example.com"), `https://sirius.example.com/v/${token}`);
   assert.equal(buildScanUrl(token, "https://sirius.example.com/"), `https://sirius.example.com/v/${token}`);
-  assert.throws(() => buildScanUrl(token, ""), /APP_BASE_URL/);
+  assert.throws(() => buildScanUrl(token, ""), /Control Center → Platform Settings/);
   assert.throws(() => buildScanUrl("nope", "sirius.example.com"), /malformed token/);
   assert.throws(() => buildScanUrl(token, "sirius.example.com/path"), /hostname/);
+});
+
+test("public website URL validation allows hostnames and local development only", () => {
+  assert.equal(getAppBaseUrl("sirius.example.com", { production: true }), "https://sirius.example.com");
+  assert.equal(getAppBaseUrl("https://sirius.example.com/", { production: true }), "https://sirius.example.com");
+  assert.equal(getAppBaseUrl("http://localhost:3000", { production: false }), "http://localhost:3000");
+  assert.throws(() => getAppBaseUrl("http://sirius.example.com", { production: true }), /HTTPS in production/);
+  assert.throws(() => getAppBaseUrl("localhost:3000", { production: true }), /localhost/);
+  assert.throws(() => getAppBaseUrl("sirius.example.com:99999", { production: true }), /valid website hostname/);
+  assert.throws(() => getAppBaseUrl("sirius.example.com/path", { production: true }), /paths/);
+  assert.throws(() => getAppBaseUrl("sirius.example.com?next=elsewhere", { production: true }), /paths/);
 });

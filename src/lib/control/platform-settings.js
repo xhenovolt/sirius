@@ -35,6 +35,14 @@ export async function setSetting(key, value) {
   );
 }
 
+export async function getAppBaseUrlSetting() {
+  const rows = await query(
+    "SELECT value_text FROM platform_settings WHERE key_name = ? LIMIT 1",
+    ["app_base_url"],
+  );
+  return rows[0]?.value_text ?? "";
+}
+
 export async function getSchoolPasswordPolicy() {
   const raw = await getSetting("school_password_policy");
   if (!raw) return { ...DEFAULT_SCHOOL_PASSWORD_POLICY };

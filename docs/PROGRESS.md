@@ -895,3 +895,24 @@ remediation commits were made as part of this audit.
 - `npm.cmd run build`: passed; `/cards` compiled in the production route build.
 - `git diff --check`: passed. Phase A report and diagnostic logging are ready
   for commit; no functional fix has been made.
+
+## 2026-11-08 — Configure QR website origin in Control Center
+
+- Added a public website URL field to Control Center → Platform Settings.
+  Control operators with `settings.edit` can save the deployment's public
+  hostname to the existing global `platform_settings` key-value table; updates
+  use the existing platform audit log. No migration or school-level URL input
+  is needed.
+- `/cards` now uses the saved platform URL first and `APP_BASE_URL` as a
+  backwards-compatible fallback. The selected origin is passed explicitly to
+  QR URL generation; setting a database hostname or relative API path is not
+  supported.
+- URL validation canonicalizes hostnames to HTTPS, rejects paths, credentials,
+  query/fragment components and invalid ports, and requires HTTPS/non-localhost
+  in production. HTTP localhost remains available for local development.
+- Updated the deployment checklist to configure the origin through the UI.
+  Existing printed cards are unchanged; old domains must keep redirecting or
+  cards must be reprinted after a domain change.
+- Validation: `npm.cmd test` passed (71/71); `npm.cmd run build` passed;
+  `git diff --check` passed. Production Control Center saving and QR issuance
+  still need an operator session and deployment smoke test.

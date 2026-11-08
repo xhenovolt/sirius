@@ -31,6 +31,7 @@ export default function SettingsPage() {
         maintenance_message: j.settings.maintenance.message,
         free_trial_days: j.settings.free_trial_days,
         free_trial_card_limit: j.settings.free_trial_card_limit ?? "",
+        app_base_url: j.settings.app_base_url ?? "",
         school_password_policy: j.settings.school_password_policy,
       });
     } catch (loadError) {
@@ -50,6 +51,7 @@ export default function SettingsPage() {
           maintenance_message: form.maintenance_message,
           free_trial_days: form.free_trial_days,
           free_trial_card_limit: form.free_trial_card_limit === "" ? 0 : form.free_trial_card_limit,
+          app_base_url: form.app_base_url,
           school_password_policy: {
             ...form.school_password_policy,
             minLength: Number(form.school_password_policy.minLength),
@@ -59,6 +61,7 @@ export default function SettingsPage() {
       const j = await r.json();
       if (!r.ok) { setError(j.error || "Failed to save"); return; }
       setData(j.settings);
+      setForm((current) => ({ ...current, app_base_url: j.settings.app_base_url }));
       setSaved(true);
     } catch (saveError) {
       console.error("Control settings save failed", saveError);
@@ -81,6 +84,33 @@ export default function SettingsPage() {
 
       {error && <p className="text-sm text-rose-400">{error}</p>}
       {saved && <p className="text-sm text-emerald-400">Settings saved.</p>}
+
+      <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 space-y-3">
+        <h2 className="font-semibold">Public website URL for QR codes</h2>
+        <p className="text-xs text-slate-500">
+          This is the Sirius website hostname encoded in newly generated student QR codes. It is not a TiDB or API path. Use the public domain only; existing printed cards keep their original URL.
+        </p>
+        <label className="text-xs text-slate-400 space-y-1 block">
+          Public website hostname
+          <input
+            value={form.app_base_url}
+            disabled={!editable}
+            onChange={(e) => setForm({ ...form, app_base_url: e.target.value })}
+            className={input}
+            placeholder="sirius-psi-three.vercel.app"
+            autoComplete="url"
+            maxLength={255}
+          />
+        </label>
+        <p className="text-xs text-slate-500">
+          {data.app_base_url_source === "control_panel"
+            ? "Managed here in Control Center."
+            : data.app_base_url_source === "environment"
+              ? "Currently using the deployment environment value. Saving here overrides it."
+              : "Not configured. Set this before generating QR cards."}
+          {" "}HTTPS is required in production. Leave blank to use the deployment environment value, if one is set.
+        </p>
+      </section>
 
       <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 space-y-3">
         <h2 className="font-semibold">Maintenance mode</h2>

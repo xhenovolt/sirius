@@ -8,8 +8,11 @@ must not be treated as production-ready evidence.
 - [ ] Keep database credentials in `.env.local` or the deployment secret store.
       Never commit them or expose them through `NEXT_PUBLIC_*`.
 - [ ] Set `TIDB_HOST`, `TIDB_PORT`, `TIDB_USER`, `TIDB_PASSWORD`, and `TIDB_DB`.
-- [ ] Set `APP_BASE_URL` to the public hostname only (no path). QR generation
-      always emits an HTTPS `/v/{opaque-token}` URL.
+- [ ] In Control Center → Platform Settings, set the public website hostname
+      used for QR verification (for example `sirius-psi-three.vercel.app`).
+      Production requires HTTPS; do not enter a database host or API path.
+      The `APP_BASE_URL` environment variable remains an optional fallback.
+      QR generation always emits an HTTPS `/v/{opaque-token}` URL.
 - [ ] Confirm production TLS, secure school-session cookies, and control-plane
       cookie/session isolation.
 - [ ] Verify the production origin and email/photo-storage configuration without

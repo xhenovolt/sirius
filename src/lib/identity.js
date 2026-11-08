@@ -141,13 +141,48 @@ export async function resolveToken(executor, publicToken) {
   return { outcome: "resolved", identity };
 }
 
-export function getAppBaseUrl(baseUrl = process.env.APP_BASE_URL) {
-  if (!baseUrl) throw new Error("APP_BASE_URL is not configured.");
-  const host = baseUrl.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "");
-  if (!/^[a-z0-9.-]+(?::\d{1,5})?$/i.test(host)) {
-    throw new Error("APP_BASE_URL must contain only a hostname and optional port.");
+export class AppBaseUrlError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "AppBaseUrlError";
+    this.code = "APP_BASE_URL_INVALID";
   }
-  return `https://${host}`;
+}
+
+export function getAppBaseUrl(baseUrl = process.env.APP_BASE_URL, {
+  production = process.env.NODE_ENV === "production",
+} = {}) {
+  if (typeof baseUrl !== "string" || !baseUrl.trim()) {
+    throw new AppBaseUrlError("Set the public website URL in Control Center → Platform Settings.");
+  }
+  const value = baseUrl.trim();
+  const candidate = /^https?:\/\//i.test(value) ? value : `https://${value}`;
+  let url;
+  try {
+    url = new URL(candidate);
+  } catch {
+    throw new AppBaseUrlError("Enter a valid website hostname, such as sirius.example.com.");
+  }
+  if (!["http:", "https:"].includes(url.protocol)
+    || !url.hostname
+    || url.username
+    || url.password
+    || url.pathname !== "/"
+    || url.search
+    || url.hash) {
+    throw new AppBaseUrlError("Enter only a public website hostname; paths, credentials, query strings, and fragments are not allowed.");
+  }
+  const isLocalHost = url.hostname === "localhost"
+    || url.hostname.endsWith(".localhost")
+    || url.hostname === "127.0.0.1"
+    || url.hostname === "[::1]";
+  if (production && url.protocol !== "https:") {
+    throw new AppBaseUrlError("The public website URL must use HTTPS in production.");
+  }
+  if (production && isLocalHost) {
+    throw new AppBaseUrlError("A localhost URL cannot be used for production QR codes.");
+  }
+  return url.origin;
 }
 
 export function buildScanUrl(publicToken, baseUrl = process.env.APP_BASE_URL) {

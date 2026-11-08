@@ -8,22 +8,26 @@ import { NextResponse } from "next/server";
 import { controlAudit, clientIp } from "@/lib/control/auth";
 import { requireControl } from "@/lib/control/guard";
 import {
-  getMaintenance, setMaintenance, getFreeTrialDays, getFreeTrialCardLimit,
+  getAppBaseUrlSetting, getMaintenance, setMaintenance, getFreeTrialDays, getFreeTrialCardLimit,
   getSchoolPasswordPolicy, setSchoolPasswordPolicy, setSetting, MAINTENANCE_MODES,
 } from "@/lib/control/platform-settings";
 import { parseSchoolPasswordPolicy } from "@/lib/passwordPolicyRules";
+import { AppBaseUrlError, getAppBaseUrl } from "@/lib/identity";
 
 export const runtime = "nodejs";
 
 async function readSettings() {
-  const [maintenance, freeTrialDays, freeTrialCardLimit, schoolPasswordPolicy] = await Promise.all([
-    getMaintenance(), getFreeTrialDays(), getFreeTrialCardLimit(), getSchoolPasswordPolicy(),
+  const [maintenance, freeTrialDays, freeTrialCardLimit, schoolPasswordPolicy, configuredAppBaseUrl] = await Promise.all([
+    getMaintenance(), getFreeTrialDays(), getFreeTrialCardLimit(), getSchoolPasswordPolicy(), getAppBaseUrlSetting(),
   ]);
+  const environmentAppBaseUrl = process.env.APP_BASE_URL || "";
   return {
     maintenance,
     free_trial_days: freeTrialDays,
     free_trial_card_limit: freeTrialCardLimit,
     school_password_policy: schoolPasswordPolicy,
+    app_base_url: configuredAppBaseUrl || environmentAppBaseUrl,
+    app_base_url_source: configuredAppBaseUrl ? "control_panel" : environmentAppBaseUrl ? "environment" : "not_configured",
     maintenance_modes: MAINTENANCE_MODES,
   };
 }
@@ -44,11 +48,22 @@ export async function PUT(request) {
   if (g.res) return g.res;
   const user = g.user;
   const body = await request.json().catch(() => null);
-  if (!body) return NextResponse.json({ error: "Invalid body" }, { status: 400 });
+  if (!body || typeof body !== "object" || Array.isArray(body)) return NextResponse.json({ error: "Invalid body" }, { status: 400 });
   if (body.school_password_policy !== undefined && !parseSchoolPasswordPolicy(body.school_password_policy)) {
     return NextResponse.json({
       error: "Password policy must set a minimum length from 6 to 72 and choose true or false for each character requirement.",
     }, { status: 400 });
+  }
+  let normalizedAppBaseUrl;
+  if (body.app_base_url !== undefined && String(body.app_base_url).trim()) {
+    try {
+      normalizedAppBaseUrl = getAppBaseUrl(String(body.app_base_url));
+    } catch (error) {
+      if (error instanceof AppBaseUrlError) {
+        return NextResponse.json({ error: error.message }, { status: 400 });
+      }
+      throw error;
+    }
   }
 
   try {
@@ -69,6 +84,10 @@ export async function PUT(request) {
     }
     if (body.school_password_policy !== undefined) {
       changes.school_password_policy = await setSchoolPasswordPolicy(body.school_password_policy);
+    }
+    if (body.app_base_url !== undefined) {
+      await setSetting("app_base_url", normalizedAppBaseUrl || "");
+      changes.app_base_url_configured = Boolean(normalizedAppBaseUrl);
     }
     if (!Object.keys(changes).length) return NextResponse.json({ error: "Nothing to change" }, { status: 400 });
 
