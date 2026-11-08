@@ -694,8 +694,9 @@ remediation commits were made as part of this audit.
   other SuperAdmins and all school users, and reset user passwords. Non-
   SuperAdmins cannot assign elevated roles or manage SuperAdmin accounts.
   Self-removal and last-active-admin guards remain enforced.
-- User removal disables the account, ends its sessions, retains the record for
-  audit/history, and excludes it from the active user list.
+- User removal disables the account and hides it from the active user list.
+  This behavior was not the requested deletion semantics; superseded by the
+  2026-11-08 hard-delete correction below.
 - Disabled the legacy bootstrap endpoint, which hard-coded a `default` tenant;
   school provisioning remains through signup.
 
@@ -704,3 +705,20 @@ remediation commits were made as part of this audit.
 - `npm.cmd test`: passed, 61 tests, including phone normalization, role
   authorization, active-list removal, soft-delete, and session revocation.
 - `npm.cmd run build` and `git diff --check`: passed.
+
+## 2026-11-08 — Permanently delete school users
+
+- Corrected the Delete action to physically delete the tenant-scoped user row.
+  Existing foreign keys cascade role memberships, sessions, and password reset
+  codes; audit entries remain, with the database setting their `user_id` to
+  NULL while retaining the actor email and event details.
+- Added migration 014 to purge accounts retained by the previous soft-delete
+  behavior.
+- A read-only preflight found one previously soft-deleted user; the migration
+  found one role membership and no sessions, reset codes, or audit rows for
+  that row. Applied migration 014; verified the database now has zero
+  soft-deleted user rows and the migration runner reports up to date on rerun.
+- Updated the confirmation dialog to state deletion is permanent and added
+  coverage that the delete statement is constrained to the session's school.
+- `npm.cmd test`: passed, 61 tests. `npm.cmd run build` and `git diff --check`
+  passed.

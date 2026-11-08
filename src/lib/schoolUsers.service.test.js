@@ -34,7 +34,7 @@ mock.module("./dbTenant.js", {
 
 const { listSchoolUsers, performSchoolUserAction } = await import("./schoolUsers.js");
 
-test("school user lists exclude removed users while retaining soft-delete history", async () => {
+test("school user lists exclude any retained legacy soft-deleted accounts", async () => {
   calls.length = 0;
   await listSchoolUsers("school-a");
 
@@ -58,7 +58,7 @@ test("SuperAdmin can assign any seeded school role to another user", async () =>
   assert.ok(calls.some(({ sql, params }) => /UPDATE users SET role/i.test(sql) && params[0] === "admin"));
 });
 
-test("deleting a user revokes access and sessions without hard-deleting history", async () => {
+test("deleting a user physically removes the account within its tenant", async () => {
   calls.length = 0;
   const result = await performSchoolUserAction({
     schoolId: "school-a",
@@ -69,7 +69,10 @@ test("deleting a user revokes access and sessions without hard-deleting history"
   });
 
   assert.deepEqual(result, { ok: true });
-  assert.ok(calls.some(({ sql }) => /UPDATE users SET deleted_at = CURRENT_TIMESTAMP, status = 'disabled'/i.test(sql)));
-  assert.ok(calls.some(({ sql }) => /UPDATE sessions SET is_active = 0/i.test(sql)));
-  assert.equal(calls.some(({ sql }) => /DELETE FROM users/i.test(sql)), false);
+  const deletion = calls.find(({ sql }) => /DELETE FROM users/i.test(sql));
+  assert.ok(deletion);
+  assert.match(deletion.sql, /WHERE id = \? AND school_id = \?/i);
+  assert.deepEqual(deletion.params, [9, "school-a"]);
+  assert.equal(calls.some(({ sql }) => /UPDATE users SET deleted_at/i.test(sql)), false);
+  assert.equal(calls.some(({ sql }) => /UPDATE sessions SET is_active = 0/i.test(sql)), false);
 });

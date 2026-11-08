@@ -172,9 +172,9 @@ export default function SettingsForm({ school, users, currentUserId, isSuperAdmi
                       </button>
                       <button
                         type="button"
-                        onClick={() => userAction(user.id, "delete", {}, `Remove ${user.display_name} from this school? Their access and sessions will end; audit history will be retained.`)}
+                        onClick={() => userAction(user.id, "delete", {}, `Permanently delete ${user.display_name}? Their school-user account, sessions, role assignments, and password reset codes will be removed. This cannot be undone. Audit history will remain.`)}
                       >
-                        Remove
+                        Delete
                       </button>
                     </>}
                   </span>

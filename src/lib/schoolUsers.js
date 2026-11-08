@@ -200,10 +200,9 @@ export async function performSchoolUserAction({
       );
     } else if (action === "delete") {
       await scoped.query(
-        "UPDATE users SET deleted_at = CURRENT_TIMESTAMP, status = 'disabled', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND school_id = ?",
+        "DELETE FROM users WHERE id = ? AND school_id = ?",
         [targetId, schoolId],
       );
-      await endUserSessions(scoped, targetId, schoolId);
     } else if (action === "logout") {
       await endUserSessions(scoped, targetId, schoolId);
     }
