@@ -6,9 +6,8 @@ export async function POST(request) {
   try {
     const { email, password } = await request.json();
     if (typeof email !== "string" || typeof password !== "string" || !email || !password) return NextResponse.json({ error: "Email and password are required." }, { status: 400 });
-    const user = await authenticate(email, password);
+    const user = await authenticate(email, password, request);
     if (!user) {
-      await recordAuditLog({ request, action: "login.failed", entityType: "user", entityId: email, details: { email } });
       return NextResponse.json({ error: "Invalid email or password." }, { status: 401 });
     }
     await recordAuditLog({ session: user, request, action: "login.success", entityType: "user", entityId: String(user.id) });

@@ -3,8 +3,10 @@ import bcrypt from "bcryptjs";
 import { cookies } from "next/headers";
 import { getDb } from "./db.js";
 import { queryTenant, withTenantTransaction } from "./dbTenant.js";
+import { recordAuditLog } from "./audit.js";
 import { assignRole, createSchoolWithSuperAdmin, findRoleId, superAdminSlug } from "./tenancy.js";
 import { checkCapacity } from "./entitlements.js";
+import { getLoginFailureReason } from "./loginFailure.js";
 import {
   normalizeUgandaPhone,
   passwordResetPhoneLookupValues,
@@ -185,16 +187,32 @@ export async function createUser({ schoolId, email, password, displayName, phone
 }
 
 export async function authenticate(email, password, request) {
+  const normalizedEmail = String(email).trim().toLowerCase();
   const [rows] = await getDb().query(
     `SELECT id, email, display_name, password_hash, school_id, status
        FROM users
       WHERE email = ? AND deleted_at IS NULL
       LIMIT 1`,
-    [String(email).trim().toLowerCase()],
+    [normalizedEmail],
   );
   const user = rows[0];
-  if (!user || !(await bcrypt.compare(password, user.password_hash))) return null;
-  if (user.status !== "active") return null;
+  if (!user) {
+    console.warn("School sign-in rejected", { reason: "account_not_found" });
+    return null;
+  }
+  const passwordMatches = await bcrypt.compare(password, user.password_hash);
+  const failureReason = getLoginFailureReason(user, passwordMatches);
+  if (failureReason) {
+    await recordAuditLog({
+      session: { id: user.id, email: user.email, school_id: user.school_id },
+      request,
+      action: "login.failed",
+      entityType: "user",
+      entityId: String(user.id),
+      details: { reason: failureReason },
+    });
+    return null;
+  }
 
   const token = newSessionToken();
   const expiresAt = await insertSession(user.id, user.school_id, token, request);

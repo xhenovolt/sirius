@@ -722,3 +722,26 @@ remediation commits were made as part of this audit.
   coverage that the delete statement is constrained to the session's school.
 - `npm.cmd test`: passed, 61 tests. `npm.cmd run build` and `git diff --check`
   passed.
+
+## 2026-11-08 — Investigate repeated Jipra sign-in failures
+
+- Read-only inspection of the configured database found five remaining Jipra
+  users, all active with correctly structured bcrypt cost-12 hashes. Four have
+  a successful initial login recorded and no recorded admin password reset.
+  The application has no automatic password-age expiry; sessions expire after
+  seven days. These checks do not prove what password a user submitted or what
+  code is currently running on the deployed host.
+- Found 20 existing Jipra `login.failed` audit rows, but none has a failure
+  reason, so they cannot distinguish a password mismatch from an inactive
+  account. The committed login route also attempted to audit failures without
+  a school session, which the tenant-safe audit helper skips. Authentication
+  now records known-account failures within that account's school, classifying
+  only `password_mismatch` or `account_inactive`; unknown-account attempts are
+  logged without identifying data. No password or hash is logged.
+- Passed the HTTP request through to session creation so IP and user-agent
+  context is available when a user successfully signs in.
+- Added unit coverage for failure classification. Next diagnostic step is to
+  inspect a failed attempt's `login.failed` audit entry and verify the deployed
+  host is running the pushed commit. The configured environment has no
+  `APP_BASE_URL`, so the live deployment could not be checked from this
+  workspace. The actual entered password cannot be inspected or logged safely.
