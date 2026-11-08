@@ -6,6 +6,7 @@ import { useControlAccess } from "@/components/control/ControlAccess";
 import { Loader2 } from "@/components/control/icons";
 import { useSchoolPasswordPolicy } from "@/components/SchoolPasswordPolicy";
 import { describeSchoolPasswordPolicy } from "@/lib/passwordPolicyRules";
+import { confirmDialog } from "@/lib/sweetAlert";
 
 const SEV = {
   ok: "text-emerald-300 bg-emerald-500/10",
@@ -36,7 +37,7 @@ export default function SchoolsPage() {
   useEffect(() => { load(); }, [load]);
 
   const act = useCallback(async (payload, confirmText) => {
-    if (confirmText && !window.confirm(confirmText)) return;
+    if (confirmText && !(await confirmDialog(confirmText, { danger: true }))) return;
     setBusy(true); setError(null);
     try {
       const r = await fetch("/api/control-center/schools", {

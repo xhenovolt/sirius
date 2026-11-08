@@ -8,6 +8,8 @@ import { assignRole, createSchoolWithSuperAdmin, findRoleId, superAdminSlug } fr
 import { checkCapacity } from "./entitlements.js";
 import { getLoginFailureReason } from "./loginFailure.js";
 import { assertSchoolPassword } from "./schoolPassword.js";
+import { hasSchoolPermission } from "./schoolPermissions.js";
+export { hasSchoolPermission };
 import {
   normalizeUgandaPhone,
   passwordResetPhoneLookupValues,
@@ -65,12 +67,22 @@ const sessionSelect = `
            SELECT 1
            FROM user_roles ur
            JOIN roles r ON r.id = ur.role_id
+           LEFT JOIN role_permissions rp
+             ON rp.role_id = r.id AND rp.school_id = r.school_id
            WHERE ur.user_id = u.id
              AND ur.school_id = u.school_id
              AND ur.is_active = 1
              AND r.is_active = 1
-             AND r.slug IN ('superadmin', 'admin')
-         ) AS isSchoolAdmin
+             AND (r.slug IN ('superadmin', 'admin') OR rp.permission_key = 'users.manage')
+         ) AS isSchoolAdmin,
+         COALESCE((
+           SELECT GROUP_CONCAT(DISTINCT rp.permission_key ORDER BY rp.permission_key SEPARATOR ',')
+             FROM user_roles ur
+             JOIN roles r ON r.id = ur.role_id AND r.school_id = ur.school_id
+             JOIN role_permissions rp ON rp.role_id = r.id AND rp.school_id = r.school_id
+            WHERE ur.user_id = u.id AND ur.school_id = u.school_id
+              AND ur.is_active = 1 AND r.is_active = 1
+         ), '') AS permissionList
   FROM sessions s
   JOIN users u ON u.id = s.user_id
   WHERE s.token_hash = ?
@@ -93,6 +105,7 @@ function shapeSession(row) {
     role: row.roleSlug,
     isSuperAdmin: Boolean(row.isSuperAdmin),
     isSchoolAdmin: Boolean(row.isSchoolAdmin),
+    permissions: row.permissionList ? row.permissionList.split(",") : [],
   };
 }
 
@@ -272,6 +285,11 @@ export async function requireSession() {
 export async function requireSchoolAdmin() {
   const session = await getSession();
   return session && session.isSchoolAdmin ? session : null;
+}
+
+export async function requireSchoolPermission(permission) {
+  const session = await getSession();
+  return hasSchoolPermission(session, permission) ? session : null;
 }
 
 export async function destroySession() {

@@ -38,7 +38,7 @@ mock.module("./dbTenant.js", {
           if (/SELECT school_id FROM schools/i.test(sql)) return [[{ school_id: schoolId }]];
           if (/SELECT u\.id, u\.status, u\.deleted_at/i.test(sql)) return [[target]];
           if (/SELECT COUNT\(DISTINCT u\.id\)/i.test(sql)) return [[{ count: 2 }]];
-          if (/SELECT id FROM roles/i.test(sql)) return [[{ id: 44 }]];
+          if (/SELECT (?:r\.)?id[, ]/i.test(sql) && /FROM roles/i.test(sql)) return [[{ id: 44, manages_users: 1 }]];
           return [{ affectedRows: 1 }];
         },
       });
@@ -73,6 +73,37 @@ test("school user password reset applies the current platform policy", async () 
     reason: "Password must include at least 6 characters.",
   });
   assert.equal(calls.length, 0);
+});
+
+test("school user password reset accepts an allowed password and revokes sessions", async () => {
+  calls.length = 0;
+  const result = await performSchoolUserAction({
+    schoolId: "school-a",
+    actorId: 7,
+    actorIsSuperAdmin: true,
+    userId: 9,
+    action: "reset_password",
+    values: { password: "pass123" },
+  });
+
+  assert.deepEqual(result, { ok: true });
+  assert.ok(calls.some(({ sql }) => /UPDATE users SET password_hash/i.test(sql)));
+  assert.ok(calls.some(({ sql }) => /UPDATE sessions SET is_active = 0/i.test(sql)));
+});
+
+test("school user password reset accepts the legacy reset-password action name", async () => {
+  calls.length = 0;
+  const result = await performSchoolUserAction({
+    schoolId: "school-a",
+    actorId: 7,
+    actorIsSuperAdmin: true,
+    userId: 9,
+    action: "reset-password",
+    values: { password: "pass123" },
+  });
+
+  assert.deepEqual(result, { ok: true });
+  assert.ok(calls.some(({ sql }) => /UPDATE users SET password_hash/i.test(sql)));
 });
 
 test("SuperAdmin can assign any seeded school role to another user", async () => {

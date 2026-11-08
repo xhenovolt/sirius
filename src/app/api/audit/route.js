@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { requireSchoolAdmin } from "@/lib/auth";
+import { requireSchoolPermission } from "@/lib/auth";
 import { listAuditLogs } from "@/lib/audit";
 
 export async function GET() {
-  const admin = await requireSchoolAdmin();
-  if (!admin) return NextResponse.json({ error: "Administrator access required." }, { status: 403 });
+  const admin = await requireSchoolPermission("audit.view");
+  if (!admin) return NextResponse.json({ error: "Permission to view the audit log is required." }, { status: 403 });
   try {
     return NextResponse.json({ logs: await listAuditLogs(admin.school_id, 200) });
   } catch (error) {

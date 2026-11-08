@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { ImportError, commitImportBatch, getImportBatch, listImportRows, listImportVersions, rollbackImportBatch, updateImportRows } from "@/lib/imports";
-import { getSession } from "@/lib/auth";
+import { requireSchoolPermission } from "@/lib/auth";
 import { recordAuditLog } from "@/lib/audit";
 
 export const runtime = "nodejs";
@@ -29,8 +29,8 @@ function failure(error, fallback) {
 
 /** GET: a page of staged rows for review. */
 export async function GET(request, { params }) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+  const session = await requireSchoolPermission("imports.view");
+  if (!session) return NextResponse.json({ error: "Permission to view imports is required." }, { status: 403 });
   const batchId = await readBatchId(params);
   if (!batchId) return NextResponse.json({ error: "Invalid import batch." }, { status: 400 });
 
@@ -50,8 +50,8 @@ export async function GET(request, { params }) {
 
 /** PATCH: save corrections to staged rows, then revalidate the batch. */
 export async function PATCH(request, { params }) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+  const session = await requireSchoolPermission("imports.manage");
+  if (!session) return NextResponse.json({ error: "Permission to manage imports is required." }, { status: 403 });
   const batchId = await readBatchId(params);
   if (!batchId) return NextResponse.json({ error: "Invalid import batch." }, { status: 400 });
 
@@ -73,8 +73,8 @@ export async function PATCH(request, { params }) {
 
 /** POST: commit the staged batch into students. */
 export async function POST(request, { params }) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+  const session = await requireSchoolPermission("imports.manage");
+  if (!session) return NextResponse.json({ error: "Permission to manage imports is required." }, { status: 403 });
   const batchId = await readBatchId(params);
   if (!batchId) return NextResponse.json({ error: "Invalid import batch." }, { status: 400 });
 
@@ -96,8 +96,8 @@ export async function POST(request, { params }) {
 
 /** DELETE: roll back a completed batch if its affected students are unchanged. */
 export async function DELETE(request, { params }) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+  const session = await requireSchoolPermission("imports.manage");
+  if (!session) return NextResponse.json({ error: "Permission to manage imports is required." }, { status: 403 });
   const batchId = await readBatchId(params);
   if (!batchId) return NextResponse.json({ error: "Invalid import batch." }, { status: 400 });
 

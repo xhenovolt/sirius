@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Monitor, Smartphone, CheckCircle2, Shield } from "@/components/control/icons";
+import { confirmDialog } from "@/lib/sweetAlert";
 
 function describe(userAgent) {
   const ua = String(userAgent || "");
@@ -28,7 +29,11 @@ export default function SessionsPage() {
   useEffect(() => { load(); }, [load]);
 
   const revoke = useCallback(async (id) => {
-    if (!window.confirm("Revoke this Control Center session immediately?")) return;
+    if (!(await confirmDialog("Revoke this Control Center session immediately?", {
+      title: "Revoke session?",
+      confirmText: "Revoke session",
+      danger: true,
+    }))) return;
     setBusy(id); setError(null);
     try {
       const r = await fetch(`/api/control-center/sessions?id=${id}`, { method: "DELETE" });
@@ -39,8 +44,12 @@ export default function SessionsPage() {
   }, [load]);
 
   const revokeAction = useCallback(async (action) => {
-    const prompt = action === "revoke_all" ? "Revoke every Control Center session, including this one?" : "Revoke all other Control Center sessions?";
-    if (!window.confirm(prompt)) return;
+    const confirmation = action === "revoke_all" ? "Revoke every Control Center session, including this one?" : "Revoke all other Control Center sessions?";
+    if (!(await confirmDialog(confirmation, {
+      title: "Revoke sessions?",
+      confirmText: "Revoke sessions",
+      danger: true,
+    }))) return;
     setBusy(action); setError(null);
     try {
       const r = await fetch("/api/control-center/sessions", {

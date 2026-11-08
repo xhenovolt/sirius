@@ -4,12 +4,18 @@ import { getSession } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import LogoutButton from "../LogoutButton";
 import StudentCreateForm from "./StudentCreateForm";
+import AccessDenied from "../AccessDenied";
+import { hasSchoolPermission } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 export default async function StudentsPage({ searchParams }) {
   const session = await getSession();
   if (!session) redirect("/login");
+  if (!hasSchoolPermission(session, "students.view")) return <AccessDenied />;
+  const canManageStudents = hasSchoolPermission(session, "students.manage");
+  const canViewImports = hasSchoolPermission(session, "imports.view");
+  const canManageImports = hasSchoolPermission(session, "imports.manage");
   const params = await searchParams;
   const search = typeof params?.search === "string" ? params.search : "";
   let students = [];
@@ -27,13 +33,13 @@ export default async function StudentsPage({ searchParams }) {
       <header className="topbar">
         <Link className="brand" href="/"><span className="brand-mark">S</span><span>Sirius</span></Link>
         <nav className="main-nav" aria-label="Main navigation">
-          <Link href="/">Overview</Link><Link className="active" href="/students">Students</Link><Link href="/import">Imports</Link><Link href="/cards">Cards</Link><Link href="/settings">Settings</Link>
+          {hasSchoolPermission(session, "dashboard.view") && <Link href="/">Overview</Link>}<Link className="active" href="/students">Students</Link>{canViewImports && <Link href="/import">Imports</Link>}{hasSchoolPermission(session, "cards.view") && <Link href="/cards">Cards</Link>}{(session.isSuperAdmin || session.permissions.includes("school.settings.manage") || session.permissions.includes("users.manage") || session.permissions.includes("clearance.view") || session.permissions.includes("clearance.manage") || session.permissions.includes("audit.view")) && <Link href="/settings">Settings</Link>}
         </nav>
         <LogoutButton />
       </header>
       <main className="dashboard students-page">
-        <div className="page-title"><div><p className="eyebrow">Student records</p><h1>Students</h1><p className="intro-copy">Search and manage the learners in your school.</p></div><Link className="button button-primary" href="/import"><span>+</span> Import students</Link></div>
-        <StudentCreateForm />
+        <div className="page-title"><div><p className="eyebrow">Student records</p><h1>Students</h1><p className="intro-copy">Search and manage the learners in your school.</p></div>{canManageImports && <Link className="button button-primary" href="/import"><span>+</span> Import students</Link>}</div>
+        {canManageStudents && <StudentCreateForm />}
         <form className="search-bar" method="get">
           <span className="search-icon">⌕</span><input name="search" defaultValue={search} placeholder="Search by name, student account number or Sirius ID" aria-label="Search students" /><button type="submit">Search</button>
         </form>

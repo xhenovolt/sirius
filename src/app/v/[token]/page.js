@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { headers } from "next/headers";
-import { getSession } from "@/lib/auth";
+import { getSession, hasSchoolPermission } from "@/lib/auth";
 import { getVerificationResult } from "@/lib/clearance";
 
 export const dynamic = "force-dynamic";
@@ -31,7 +31,7 @@ export default async function TokenVerificationPage({ params }) {
   try {
     const [session, requestHeaders] = await Promise.all([getSession(), headers()]);
     result = await getVerificationResult(token, {
-      session,
+      session: hasSchoolPermission(session, "students.view") ? session : null,
       ipAddress: requestHeaders.get("x-forwarded-for")?.split(",")[0]?.trim()
         || requestHeaders.get("x-real-ip"),
       userAgent: requestHeaders.get("user-agent"),

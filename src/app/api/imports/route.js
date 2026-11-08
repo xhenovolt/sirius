@@ -8,7 +8,7 @@ import {
   stageImport,
 } from "@/lib/imports";
 import { suggestColumnMapping, validateColumnMapping } from "@/lib/importMapping";
-import { getSession } from "@/lib/auth";
+import { requireSchoolPermission } from "@/lib/auth";
 import { recordAuditLog } from "@/lib/audit";
 
 export const runtime = "nodejs";
@@ -36,8 +36,8 @@ async function parseSpreadsheet(buffer, fileName) {
 }
 
 export async function GET() {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+  const session = await requireSchoolPermission("imports.view");
+  if (!session) return NextResponse.json({ error: "Permission to view imports is required." }, { status: 403 });
   try {
     const [batches, templates] = await Promise.all([
       listImportBatches(session.school_id),
@@ -56,8 +56,8 @@ export async function GET() {
  * /api/imports/[batchId].
  */
 export async function POST(request) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+  const session = await requireSchoolPermission("imports.manage");
+  if (!session) return NextResponse.json({ error: "Permission to manage imports is required." }, { status: 403 });
 
   try {
     const contentType = request.headers.get("content-type") || "";

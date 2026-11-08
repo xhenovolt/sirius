@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireSchoolAdmin } from "@/lib/auth";
+import { requireSchoolPermission } from "@/lib/auth";
 import { queryTenant } from "@/lib/dbTenant";
 import { recordAuditLog } from "@/lib/audit";
 
@@ -18,8 +18,8 @@ async function readBody(request) {
 }
 
 export async function GET() {
-  const admin = await requireSchoolAdmin();
-  if (!admin) return NextResponse.json({ error: "Administrator access required." }, { status: 403 });
+  const admin = await requireSchoolPermission("clearance.view");
+  if (!admin) return NextResponse.json({ error: "Permission to view clearance rules is required." }, { status: 403 });
   try {
     const [rules] = await queryTenant(
       admin.school_id,
@@ -37,8 +37,8 @@ export async function GET() {
 }
 
 export async function POST(request) {
-  const admin = await requireSchoolAdmin();
-  if (!admin) return NextResponse.json({ error: "Administrator access required." }, { status: 403 });
+  const admin = await requireSchoolPermission("clearance.manage");
+  if (!admin) return NextResponse.json({ error: "Permission to manage clearance rules is required." }, { status: 403 });
   const body = await readBody(request);
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     return NextResponse.json({ error: "A valid JSON request body is required." }, { status: 400 });
@@ -84,8 +84,8 @@ export async function POST(request) {
 }
 
 export async function DELETE(request) {
-  const admin = await requireSchoolAdmin();
-  if (!admin) return NextResponse.json({ error: "Administrator access required." }, { status: 403 });
+  const admin = await requireSchoolPermission("clearance.manage");
+  if (!admin) return NextResponse.json({ error: "Permission to manage clearance rules is required." }, { status: 403 });
   const body = await readBody(request);
   const id = String(body?.id ?? "");
   if (!/^\d+$/.test(id) || id === "0") {

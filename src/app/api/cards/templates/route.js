@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { getSession, requireSchoolAdmin } from "@/lib/auth";
+import { requireSchoolPermission } from "@/lib/auth";
 import { CardTemplateError, listCardTemplates, saveCardTemplate } from "@/lib/cardTemplates";
 import { recordAuditLog } from "@/lib/audit";
 
 export async function GET() {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+  const session = await requireSchoolPermission("cards.view");
+  if (!session) return NextResponse.json({ error: "Permission to view card templates is required." }, { status: 403 });
   try {
     return NextResponse.json({ templates: await listCardTemplates(session.school_id) });
   } catch (error) {
@@ -15,8 +15,8 @@ export async function GET() {
 }
 
 export async function POST(request) {
-  const admin = await requireSchoolAdmin();
-  if (!admin) return NextResponse.json({ error: "Administrator access required." }, { status: 403 });
+  const admin = await requireSchoolPermission("cards.manage");
+  if (!admin) return NextResponse.json({ error: "Permission to manage card templates is required." }, { status: 403 });
   let body;
   try {
     body = await request.json();

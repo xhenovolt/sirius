@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { getDb } from "./db.js";
 import { scopeTenantConnection } from "./dbTenant.js";
 import { assertSchoolPassword } from "./schoolPassword.js";
+import { DEFAULT_ROLE_PERMISSIONS } from "./schoolPermissions.js";
 
 export const superAdminSlug = "superadmin";
 
@@ -30,6 +31,19 @@ export async function seedSchoolRoles(connection, schoolId) {
        ON DUPLICATE KEY UPDATE name = VALUES(name), is_super_admin = VALUES(is_super_admin)`,
       [schoolId, role.name, role.slug, role.description, role.isSuperAdmin ? 1 : 0],
     );
+    if (role.isSuperAdmin) continue;
+    const [roleRows] = await connection.query(
+      "SELECT id FROM roles WHERE school_id = ? AND slug = ? LIMIT 1",
+      [schoolId, role.slug],
+    );
+    const permissions = DEFAULT_ROLE_PERMISSIONS[role.slug] || [];
+    for (const permission of permissions) {
+      await connection.query(
+        `INSERT IGNORE INTO role_permissions (school_id, role_id, permission_key)
+         VALUES (?, ?, ?)`,
+        [schoolId, roleRows[0].id, permission],
+      );
+    }
   }
 }
 

@@ -2,9 +2,18 @@
 
 import { useState } from "react";
 import { useSchoolPasswordPolicy } from "@/components/SchoolPasswordPolicy";
-import { describeSchoolPasswordPolicy } from "@/lib/passwordPolicyRules";
+import { schoolPasswordPolicyError } from "@/lib/passwordPolicyRules";
+import { confirmDialog, promptDialog } from "@/lib/sweetAlert";
 
-export default function SettingsForm({ school, users, currentUserId, isSuperAdmin = false }) {
+export default function SettingsForm({
+  school,
+  users,
+  roles = [],
+  currentUserId,
+  isSuperAdmin = false,
+  canManageSchoolSettings = false,
+  canManageUsers = false,
+}) {
   const { policy } = useSchoolPasswordPolicy();
   const [form, setForm] = useState({
     schoolName: school.school_name || "",
@@ -33,7 +42,7 @@ export default function SettingsForm({ school, users, currentUserId, isSuperAdmi
   }
 
   async function userAction(userId, action, values = {}, confirmText = null) {
-    if (confirmText && !window.confirm(confirmText)) return;
+    if (confirmText && !(await confirmDialog(confirmText, { danger: ["delete", "disable", "reset_password"].includes(action) }))) return;
     setMessage("");
     try {
       const response = await fetch("/api/settings", {
@@ -52,16 +61,20 @@ export default function SettingsForm({ school, users, currentUserId, isSuperAdmi
     }
   }
 
-  function editUser(user) {
-    const displayName = window.prompt("User name", user.display_name);
+  async function editUser(user) {
+    const displayName = await promptDialog("Edit user name", { value: user.display_name, confirmText: "Continue" });
     if (displayName === null) return;
-    const phone = window.prompt("Phone number", user.phone || "");
+    const phone = await promptDialog("Edit phone number", { value: user.phone || "", confirmText: "Save" });
     if (phone === null) return;
     void userAction(user.id, "edit", { displayName, phone });
   }
 
-  function resetPassword(user) {
-    const password = window.prompt(`New password for ${user.display_name} (${describeSchoolPasswordPolicy(policy)})`);
+  async function resetPassword(user) {
+    const password = await promptDialog(`Reset password for ${user.display_name}`, {
+      input: "password",
+      confirmText: "Continue",
+      validator: (value) => schoolPasswordPolicyError(value, policy) || undefined,
+    });
     if (password === null) return;
     void userAction(
       user.id,
@@ -83,7 +96,7 @@ export default function SettingsForm({ school, users, currentUserId, isSuperAdmi
 
   return (
     <div className="settings-grid">
-      <section className="panel settings-panel">
+      {canManageSchoolSettings && <section className="panel settings-panel">
         <div className="panel-heading">
           <div><p className="eyebrow">School identity</p><h2>School details</h2></div>
         </div>
@@ -102,17 +115,18 @@ export default function SettingsForm({ school, users, currentUserId, isSuperAdmi
                 name={name}
                 value={form[name]}
                 onChange={(event) => setForm({ ...form, [name]: event.target.value })}
+                disabled={!canManageSchoolSettings}
                 required={name === "schoolName"}
                 type={name === "contactEmail" ? "email" : "text"}
               />
             </label>
           ))}
-          <button className="button button-primary" type="submit">Save school settings</button>
+          {canManageSchoolSettings && <button className="button button-primary" type="submit">Save school settings</button>}
           {message && <p className="settings-message" role="status">{message}</p>}
         </form>
-      </section>
+      </section>}
 
-      <section className="panel settings-panel">
+      {canManageUsers && <section className="panel settings-panel">
         <div className="panel-heading">
           <div><p className="eyebrow">Access control</p><h2>Users</h2></div>
           <span className="preview-count">{users.length} user{users.length === 1 ? "" : "s"}</span>
@@ -147,10 +161,9 @@ export default function SettingsForm({ school, users, currentUserId, isSuperAdmi
                       <label className="user-role-control">
                         <span className="sr-only">Role for {user.display_name}</span>
                         <select value={role} onChange={(event) => changeRole(user, event.target.value)}>
-                          <option value="superadmin">SuperAdmin</option>
-                          <option value="admin">Administrator</option>
-                          <option value="bursar">Bursar</option>
-                          <option value="operator">Operator</option>
+                          {roles.map((availableRole) => (
+                            <option key={availableRole.id} value={availableRole.slug}>{availableRole.name}</option>
+                          ))}
                         </select>
                       </label>
                     )}
@@ -187,7 +200,7 @@ export default function SettingsForm({ school, users, currentUserId, isSuperAdmi
           })}
         </div>
         {message && <p className="settings-message" role="status">{message}</p>}
-      </section>
+      </section>}
     </div>
   );
 }

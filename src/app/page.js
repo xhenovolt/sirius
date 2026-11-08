@@ -1,20 +1,31 @@
 import Link from "next/link";
 import { getRecentImports, getSchoolSettings, getStudentSummary } from "@/lib/students";
-import { getSession } from "@/lib/auth";
+import { getSession, hasSchoolPermission } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import LogoutButton from "./LogoutButton";
+import AccessDenied from "./AccessDenied";
 
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
   const session = await getSession();
   if (!session) redirect("/login");
+  if (!hasSchoolPermission(session, "dashboard.view")) return <AccessDenied />;
+  const canViewStudents = hasSchoolPermission(session, "students.view");
+  const canManageImports = hasSchoolPermission(session, "imports.manage");
+  const canViewImports = hasSchoolPermission(session, "imports.view");
+  const canViewCards = hasSchoolPermission(session, "cards.view");
+  const canAccessSettings = session.isSuperAdmin || ["users.manage", "school.settings.manage", "clearance.view", "clearance.manage", "audit.view"].some((permission) => session.permissions.includes(permission));
   let summary = { students: 0, without_photos: 0 };
   let school = { school_name: "School" };
   let recentImports = [];
   let databaseError = false;
   try {
-    [summary, recentImports, school] = await Promise.all([getStudentSummary(session.school_id), getRecentImports(session.school_id), getSchoolSettings(session.school_id)]);
+    [summary, recentImports, school] = await Promise.all([
+      getStudentSummary(session.school_id),
+      canViewImports ? getRecentImports(session.school_id) : Promise.resolve([]),
+      getSchoolSettings(session.school_id),
+    ]);
   } catch (error) {
     console.error("Dashboard load failed", error);
     databaseError = true;
@@ -31,10 +42,10 @@ export default async function Home() {
         </Link>
         <nav className="main-nav" aria-label="Main navigation">
           <a className="active" href="#overview">Overview</a>
-          <Link href="/students">Students</Link>
-          <Link href="/import">Imports</Link>
-          <Link href="/cards">Cards</Link>
-          <Link href="/settings">Settings</Link>
+          {canViewStudents && <Link href="/students">Students</Link>}
+          {canViewImports && <Link href="/import">Imports</Link>}
+          {canViewCards && <Link href="/cards">Cards</Link>}
+          {canAccessSettings && <Link href="/settings">Settings</Link>}
         </nav>
         <LogoutButton />
       </header>
@@ -46,7 +57,7 @@ export default async function Home() {
             <h1>Good morning, {session.displayName}.</h1>
             <p className="intro-copy">Here is what is happening with your student records.</p>
           </div>
-          <Link className="button button-primary" href="/import"><span>+</span> Import students</Link>
+          {canManageImports && <Link className="button button-primary" href="/import"><span>+</span> Import students</Link>}
         </section>
 
         <section className="stat-grid" aria-label="Student record summary">
@@ -66,13 +77,13 @@ export default async function Home() {
               <span className="panel-icon">↗</span>
             </div>
             <div className="action-list">
-              <Link href="/import" className="action-item"><span className="action-icon blue-icon">↥</span><span><strong>Import students</strong><small>Upload an Excel spreadsheet</small></span><span className="arrow">→</span></Link>
-              <Link href="/cards" className="action-item"><span className="action-icon mint-icon">⌗</span><span><strong>Generate QR codes</strong><small>Prepare cards for printing</small></span><span className="arrow">→</span></Link>
-              <Link href="/scan" className="action-item"><span className="action-icon peach-icon">⌁</span><span><strong>Scan a student card</strong><small>Find a student instantly</small></span><span className="arrow">→</span></Link>
+              {canManageImports && <Link href="/import" className="action-item"><span className="action-icon blue-icon">↥</span><span><strong>Import students</strong><small>Upload an Excel spreadsheet</small></span><span className="arrow">→</span></Link>}
+              {canViewCards && <Link href="/cards" className="action-item"><span className="action-icon mint-icon">⌗</span><span><strong>Generate QR codes</strong><small>Prepare cards for printing</small></span><span className="arrow">→</span></Link>}
+              {canViewStudents && <Link href="/scan" className="action-item"><span className="action-icon peach-icon">⌁</span><span><strong>Scan a student card</strong><small>Find a student instantly</small></span><span className="arrow">→</span></Link>}
             </div>
           </div>
 
-          <div className="panel imports-panel" id="imports">
+          {canViewImports && <div className="panel imports-panel" id="imports">
             <div className="panel-heading">
               <div><p className="eyebrow">Activity</p><h2>Recent imports</h2></div>
               <a className="text-link" href="#imports">View all <span>→</span></a>
@@ -86,12 +97,12 @@ export default async function Home() {
                 </div>
               ))}
             </div>
-          </div>
+          </div>}
         </section>
 
         <section className="bottom-banner" id="cards">
           <div className="banner-copy"><span className="banner-mark">⌗</span><div><p className="eyebrow">Card readiness</p><h2>{withoutPhotos} students are missing a photo</h2><p>Add photos before generating their cards for a complete identity record.</p></div></div>
-          <a className="button button-light" href="#students">Review students <span>→</span></a>
+          {canViewStudents && <a className="button button-light" href="/students">Review students <span>→</span></a>}
         </section>
       </main>
     </div>

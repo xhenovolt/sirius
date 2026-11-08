@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useControlAccess } from "@/components/control/ControlAccess";
 import { Loader2, ShieldOff } from "@/components/control/icons";
+import { confirmDialog } from "@/lib/sweetAlert";
 
 const ROLES = ["XHENVOLT_SUPER_ADMIN", "XHENVOLT_OPERATOR", "XHENVOLT_VIEWER"];
 
@@ -71,7 +72,11 @@ export default function OperatorsPage() {
   }, [editing, load]);
 
   const remove = useCallback(async (row) => {
-    if (!window.confirm(`Remove ${row.name} (${row.email})? Their sessions end immediately.`)) return;
+    if (!(await confirmDialog(`Remove ${row.name} (${row.email})? Their sessions end immediately.`, {
+      title: "Remove Control Center user?",
+      confirmText: "Remove user",
+      danger: true,
+    }))) return;
     setBusy(true); setError(null);
     try {
       const r = await fetch(`/api/control-center/users?id=${row.id}`, { method: "DELETE" });

@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { getSession } from "@/lib/auth";
+import { requireSchoolPermission } from "@/lib/auth";
 import { getStudentByUid, StudentInputError, updateStudent } from "@/lib/students";
 
 export async function GET(request, { params }) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+  const session = await requireSchoolPermission("students.view");
+  if (!session) return NextResponse.json({ error: "Permission to view student records is required." }, { status: 403 });
   const { studentUid } = await params;
   if (!/^SIRIUS-[A-Z0-9-]{3,64}$/i.test(studentUid)) return NextResponse.json({ error: "Invalid Sirius code." }, { status: 400 });
 
@@ -18,8 +18,8 @@ export async function GET(request, { params }) {
 }
 
 export async function PATCH(request, { params }) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+  const session = await requireSchoolPermission("students.manage");
+  if (!session) return NextResponse.json({ error: "Permission to manage student records is required." }, { status: 403 });
   const { studentUid } = await params;
   if (!/^SIRIUS-[A-Z0-9-]{3,64}$/i.test(studentUid)) return NextResponse.json({ error: "Invalid Sirius code." }, { status: 400 });
 

@@ -1,20 +1,28 @@
 import { NextResponse } from "next/server";
-import { createUser, requireSchoolAdmin } from "@/lib/auth";
+import { createUser, requireSchoolAdmin, requireSchoolPermission } from "@/lib/auth";
 import { queryTenant } from "@/lib/dbTenant";
 import { getSchoolSettings, getUsers } from "@/lib/students";
 import { recordAuditLog } from "@/lib/audit";
-import { ASSIGNABLE_ROLES, performSchoolUserAction } from "@/lib/schoolUsers";
+import { performSchoolUserAction } from "@/lib/schoolUsers";
 import { normalizeUgandaPhone } from "@/lib/passwordResetIdentity";
+import { listSchoolRoles } from "@/lib/schoolRoles";
 
 export async function GET() {
   const admin = await requireSchoolAdmin();
   if (!admin) return NextResponse.json({ error: "Administrator access required." }, { status: 403 });
-  try { return NextResponse.json({ school: await getSchoolSettings(admin.school_id), users: await getUsers(admin.school_id) }); } catch (error) { console.error("Settings load failed", error); return NextResponse.json({ error: "Unable to load settings." }, { status: 503 }); }
+  try {
+    const [school, users, roles] = await Promise.all([
+      getSchoolSettings(admin.school_id),
+      getUsers(admin.school_id),
+      listSchoolRoles(admin.school_id),
+    ]);
+    return NextResponse.json({ school, users, roles });
+  } catch (error) { console.error("Settings load failed", error); return NextResponse.json({ error: "Unable to load settings." }, { status: 503 }); }
 }
 
 export async function PUT(request) {
-  const admin = await requireSchoolAdmin();
-  if (!admin) return NextResponse.json({ error: "Administrator access required." }, { status: 403 });
+  const admin = await requireSchoolPermission("school.settings.manage");
+  if (!admin) return NextResponse.json({ error: "Permission to manage school settings is required." }, { status: 403 });
   try {
     const body = await request.json();
     if (!body.schoolName?.trim() || body.schoolName.length > 200) return NextResponse.json({ error: "School name is required." }, { status: 400 });
@@ -28,8 +36,8 @@ export async function PUT(request) {
 }
 
 export async function PATCH(request) {
-  const admin = await requireSchoolAdmin();
-  if (!admin) return NextResponse.json({ error: "Administrator access required." }, { status: 403 });
+  const admin = await requireSchoolPermission("users.manage");
+  if (!admin) return NextResponse.json({ error: "Permission to manage school users is required." }, { status: 403 });
   try {
     const body = await request.json();
     const userId = Number(body.userId);
@@ -57,8 +65,8 @@ export async function PATCH(request) {
 }
 
 export async function POST(request) {
-  const admin = await requireSchoolAdmin();
-  if (!admin) return NextResponse.json({ error: "Administrator access required." }, { status: 403 });
+  const admin = await requireSchoolPermission("users.manage");
+  if (!admin) return NextResponse.json({ error: "Permission to manage school users is required." }, { status: 403 });
   try {
     const body = await request.json();
     if (typeof body.displayName !== "string" || !body.displayName.trim() || body.displayName.trim().length > 150
@@ -68,14 +76,14 @@ export async function POST(request) {
       return NextResponse.json({ error: "A valid name, email, Uganda mobile number, and password are required." }, { status: 400 });
     }
     const role = body.role == null ? "operator" : body.role;
-    if (typeof role !== "string" || !ASSIGNABLE_ROLES.has(role)) {
+    if (typeof role !== "string" || !/^[a-z0-9_]{1,64}$/.test(role)) {
       return NextResponse.json({ error: "Choose a valid school role." }, { status: 400 });
     }
     if (role === "superadmin" && !admin.isSuperAdmin) {
       return NextResponse.json({ error: "Only a school SuperAdmin can create another SuperAdmin." }, { status: 403 });
     }
     if (!admin.isSuperAdmin && !["admin", "operator"].includes(role)) {
-      return NextResponse.json({ error: "Only a school SuperAdmin can assign that role." }, { status: 403 });
+      return NextResponse.json({ error: "Only a school SuperAdmin can assign this role." }, { status: 403 });
     }
     await createUser({ schoolId: admin.school_id, email: body.email.trim(), password: body.password, displayName: body.displayName.trim(), phone: body.phone?.trim() || "", roleSlug: role, createdBy: admin.id });
     await recordAuditLog({ session: admin, request, action: "user.created", entityType: "user", entityId: body.email.trim(), details: { role } });

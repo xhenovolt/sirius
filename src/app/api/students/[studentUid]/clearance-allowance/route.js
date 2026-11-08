@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireSchoolAdmin } from "@/lib/auth";
+import { requireSchoolPermission } from "@/lib/auth";
 import { kampalaDate } from "@/lib/clearance";
 import { queryTenant, queryTenantOne, withTenantTransaction } from "@/lib/dbTenant";
 import { recordAuditLog } from "@/lib/audit";
@@ -27,8 +27,8 @@ async function findStudent(schoolId, studentUid) {
 }
 
 export async function GET(request, { params }) {
-  const admin = await requireSchoolAdmin();
-  if (!admin) return NextResponse.json({ error: "Administrator access required." }, { status: 403 });
+  const admin = await requireSchoolPermission("clearance.view");
+  if (!admin) return NextResponse.json({ error: "Permission to view clearance allowances is required." }, { status: 403 });
   const { studentUid } = await params;
   try {
     const student = await findStudent(admin.school_id, studentUid);
@@ -50,8 +50,8 @@ export async function GET(request, { params }) {
 }
 
 export async function POST(request, { params }) {
-  const admin = await requireSchoolAdmin();
-  if (!admin) return NextResponse.json({ error: "Administrator access required." }, { status: 403 });
+  const admin = await requireSchoolPermission("clearance.manage");
+  if (!admin) return NextResponse.json({ error: "Permission to manage clearance allowances is required." }, { status: 403 });
   const { studentUid } = await params;
   const body = await readBody(request);
   const allowedUntil = body?.allowedUntil;
@@ -102,8 +102,8 @@ export async function POST(request, { params }) {
 }
 
 export async function DELETE(request, { params }) {
-  const admin = await requireSchoolAdmin();
-  if (!admin) return NextResponse.json({ error: "Administrator access required." }, { status: 403 });
+  const admin = await requireSchoolPermission("clearance.manage");
+  if (!admin) return NextResponse.json({ error: "Permission to manage clearance allowances is required." }, { status: 403 });
   const { studentUid } = await params;
   const body = await readBody(request);
   const allowanceId = String(body?.allowanceId ?? "");

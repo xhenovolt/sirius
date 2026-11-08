@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
-import { getSession } from "@/lib/auth";
+import { requireSchoolPermission } from "@/lib/auth";
 import { uploadStudentPhoto } from "@/lib/cloudinary";
 import { updateStudentPhoto } from "@/lib/students";
 
 export const runtime = "nodejs";
 
 export async function POST(request, { params }) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+  const session = await requireSchoolPermission("students.manage");
+  if (!session) return NextResponse.json({ error: "Permission to manage student records is required." }, { status: 403 });
   const { studentUid } = await params;
   const formData = await request.formData();
   const file = formData.get("photo");

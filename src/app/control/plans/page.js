@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useControlAccess } from "@/components/control/ControlAccess";
 import { Loader2 } from "@/components/control/icons";
+import { confirmDialog } from "@/lib/sweetAlert";
 
 const EMPTY = {
   code: "", name: "", tier: 0, price: 0, installation_fee: 0, currency: "UGX",
@@ -41,7 +42,11 @@ export default function PlansPage() {
   }, [editing, load]);
 
   const remove = useCallback(async (code) => {
-    if (!window.confirm(`Delete the "${code}" plan?`)) return;
+    if (!(await confirmDialog(`Delete the "${code}" plan?`, {
+      title: "Delete subscription plan?",
+      confirmText: "Delete plan",
+      danger: true,
+    }))) return;
     setBusy(true); setError(null);
     try {
       const r = await fetch(`/api/control-center/plans?code=${encodeURIComponent(code)}`, { method: "DELETE" });

@@ -3,7 +3,7 @@ import { queryTenant, withTenantTransaction } from "./dbTenant.js";
 import { normalizeUgandaPhone } from "./passwordResetIdentity.js";
 import { assertSchoolPassword } from "./schoolPassword.js";
 
-const ASSIGNABLE_ROLES = new Set(["superadmin", "admin", "bursar", "operator"]);
+const RESERVED_ROLES = new Set(["superadmin", "admin", "bursar", "operator"]);
 
 export function schoolUserActionPolicy({
   action,
@@ -11,6 +11,7 @@ export function schoolUserActionPolicy({
   targetId,
   targetRole,
   nextRole,
+  nextRoleIsAdmin = ["superadmin", "admin"].includes(nextRole),
   actorIsSuperAdmin = false,
   targetIsSuperAdmin = false,
   targetIsAdmin,
@@ -19,7 +20,7 @@ export function schoolUserActionPolicy({
   const isSelf = Number(actorId) === Number(targetId);
   const removesAdmin = targetIsAdmin && (
     ["demote", "disable", "delete"].includes(action)
-    || (action === "set_role" && !["superadmin", "admin"].includes(nextRole))
+    || (action === "set_role" && !nextRoleIsAdmin)
   );
 
   if (isSelf && ["demote", "disable", "delete"].includes(action)) {
@@ -61,6 +62,7 @@ export async function performSchoolUserAction({
   action,
   values = {},
 }) {
+  if (["reset-password", "resetPassword", "reset"].includes(action)) action = "reset_password";
   const targetId = Number(userId);
   if (!Number.isInteger(targetId) || targetId < 1) {
     return { ok: false, status: 400, reason: "A valid user is required." };
@@ -79,8 +81,11 @@ export async function performSchoolUserAction({
       return { ok: false, status: error.status || 400, reason: error.message };
     }
   } else if (action === "set_role") {
-    if (!ASSIGNABLE_ROLES.has(values.role)) {
+    if (typeof values.role !== "string" || !/^[a-z0-9_]{1,64}$/.test(values.role)) {
       return { ok: false, status: 400, reason: "Choose a valid school role." };
+    }
+    if (!actorIsSuperAdmin && !["admin", "operator"].includes(values.role)) {
+      return { ok: false, status: 403, reason: "Only a school SuperAdmin can assign this role." };
     }
   } else if (action === "promote" || action === "demote") {
     // Both actions have fixed role assignments.
@@ -121,8 +126,11 @@ export async function performSchoolUserAction({
                   SELECT 1
                   FROM user_roles ur
                   JOIN roles r ON r.id = ur.role_id AND r.school_id = ur.school_id AND r.is_active = 1
+                  LEFT JOIN role_permissions rp
+                    ON rp.role_id = r.id AND rp.school_id = r.school_id
                  WHERE ur.user_id = u.id AND ur.school_id = u.school_id
-                   AND ur.is_active = 1 AND r.slug IN ('superadmin', 'admin')
+                   AND ur.is_active = 1
+                   AND (r.slug IN ('superadmin', 'admin') OR rp.permission_key = 'users.manage')
               ) AS is_admin
          FROM users u
         WHERE u.id = ? AND u.school_id = ?
@@ -139,16 +147,35 @@ export async function performSchoolUserAction({
          FROM users u
          JOIN user_roles ur ON ur.user_id = u.id AND ur.school_id = u.school_id AND ur.is_active = 1
          JOIN roles r ON r.id = ur.role_id AND r.school_id = ur.school_id AND r.is_active = 1
+         LEFT JOIN role_permissions rp ON rp.role_id = r.id AND rp.school_id = r.school_id
         WHERE u.school_id = ? AND u.deleted_at IS NULL AND u.status = 'active'
-          AND r.slug IN ('superadmin', 'admin')`,
+          AND (r.slug IN ('superadmin', 'admin') OR rp.permission_key = 'users.manage')`,
       [schoolId],
     );
+    let selectedRole = null;
+    if (action === "set_role") {
+      const [roleRows] = await scoped.query(
+        `SELECT r.id,
+                (r.slug IN ('superadmin', 'admin') OR EXISTS (
+                  SELECT 1 FROM role_permissions rp
+                   WHERE rp.school_id = r.school_id AND rp.role_id = r.id
+                     AND rp.permission_key = 'users.manage'
+                )) AS manages_users
+           FROM roles r
+          WHERE r.school_id = ? AND r.slug = ? AND r.is_active = 1
+          LIMIT 1`,
+        [schoolId, values.role],
+      );
+      selectedRole = roleRows[0] || null;
+      if (!selectedRole) return { ok: false, status: 400, reason: "That role is not available for this school." };
+    }
     const policy = schoolUserActionPolicy({
       action,
       actorId,
       targetId,
       targetRole: target.role_slug,
       nextRole: values.role,
+      nextRoleIsAdmin: action === "set_role" && Number(selectedRole?.manages_users) === 1,
       actorIsSuperAdmin,
       targetIsSuperAdmin: Boolean(target.is_superadmin),
       targetIsAdmin: Boolean(target.is_admin) && target.status === "active",
@@ -160,12 +187,14 @@ export async function performSchoolUserAction({
       const roleSlug = action === "set_role"
         ? values.role
         : action === "promote" ? "admin" : "operator";
-      const [roleRows] = await scoped.query(
-        "SELECT id FROM roles WHERE school_id = ? AND slug = ? AND is_active = 1 LIMIT 1",
-        [schoolId, roleSlug],
-      );
+      const [roleRows] = action === "set_role"
+        ? [[selectedRole]]
+        : await scoped.query(
+          "SELECT id FROM roles WHERE school_id = ? AND slug = ? AND is_active = 1 LIMIT 1",
+          [schoolId, roleSlug],
+        );
       if (!roleRows[0]) {
-        return { ok: false, status: 409, reason: "That role is not configured for this school." };
+        return { ok: false, status: 400, reason: "That role is not available for this school." };
       }
       await scoped.query(
         "UPDATE user_roles SET is_active = 0 WHERE user_id = ? AND school_id = ?",
@@ -248,4 +277,4 @@ export async function listSchoolUsers(schoolId) {
   return rows;
 }
 
-export { ASSIGNABLE_ROLES };
+export { RESERVED_ROLES };

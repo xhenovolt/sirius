@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireSchoolAdmin } from "@/lib/auth";
+import { requireSchoolPermission } from "@/lib/auth";
 import { queryTenant } from "@/lib/dbTenant";
 import { uploadSchoolLogo } from "@/lib/cloudinary";
 import { recordAuditLog } from "@/lib/audit";
@@ -7,8 +7,8 @@ import { recordAuditLog } from "@/lib/audit";
 export const runtime = "nodejs";
 
 export async function POST(request) {
-  const admin = await requireSchoolAdmin();
-  if (!admin) return NextResponse.json({ error: "Administrator access required." }, { status: 403 });
+  const admin = await requireSchoolPermission("school.settings.manage");
+  if (!admin) return NextResponse.json({ error: "Permission to manage school settings is required." }, { status: 403 });
   const file = (await request.formData()).get("logo");
   if (!file || typeof file.arrayBuffer !== "function" || !["image/jpeg", "image/png", "image/webp"].includes(file.type) || file.size > 3 * 1024 * 1024) return NextResponse.json({ error: "Please choose a JPG, PNG, or WebP logo smaller than 3 MB." }, { status: 400 });
   try {

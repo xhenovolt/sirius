@@ -1,5 +1,14 @@
 @import "tailwindcss";
 
+.swal2-popup {
+  border: 1px solid #e4eae7 !important;
+  border-radius: 12px !important;
+  font-family: var(--font-geist-sans), sans-serif !important;
+}
+.swal2-title { color: #172522 !important; }
+.swal2-html-container, .swal2-input { color: #6f7d78 !important; }
+.swal2-input { border-color: #e4eae7 !important; box-shadow: none !important; }
+
 :root {
   --background: #f5f7f6;
   --foreground: #172522;

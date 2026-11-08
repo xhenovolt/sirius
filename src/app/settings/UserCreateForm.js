@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useSchoolPasswordPolicy } from "@/components/SchoolPasswordPolicy";
 import { describeSchoolPasswordPolicy } from "@/lib/passwordPolicyRules";
 
-export default function UserCreateForm({ isSuperAdmin = false }) {
+export default function UserCreateForm({ roles = [], isSuperAdmin = false }) {
   const { policy, loadError } = useSchoolPasswordPolicy();
   const [form, setForm] = useState({ displayName: "", email: "", phone: "", password: "", role: "operator" });
   const [message, setMessage] = useState("");
@@ -36,12 +36,9 @@ export default function UserCreateForm({ isSuperAdmin = false }) {
       <p className="settings-message">{describeSchoolPasswordPolicy(policy)}</p>
       {loadError && <p className="settings-message">{loadError}</p>}
       <select value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value })}>
-        <option value="operator">Operator</option>
-        <option value="admin">Administrator</option>
-        {isSuperAdmin && <>
-          <option value="bursar">Bursar</option>
-          <option value="superadmin">SuperAdmin</option>
-        </>}
+        {roles.filter((role) => isSuperAdmin || ["admin", "operator"].includes(role.slug)).map((role) => (
+          <option key={role.id} value={role.slug}>{role.name}</option>
+        ))}
       </select>
       <button className="button button-primary" type="submit" disabled={busy}>{busy ? "Creating user…" : "Create user"}</button>
       {message && <p className="settings-message" role="status">{message}</p>}

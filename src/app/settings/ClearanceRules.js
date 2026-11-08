@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-export default function ClearanceRules() {
+export default function ClearanceRules({ canManage = true }) {
   const [rules, setRules] = useState([]);
   const [form, setForm] = useState({ threshold: "", className: "", term: "", expiresAt: "" });
   const [busy, setBusy] = useState(false);
@@ -78,18 +78,18 @@ export default function ClearanceRules() {
         <div><p className="eyebrow">Clearance</p><h2>Fee-balance thresholds</h2></div>
       </div>
       <p className="settings-help">A matching active rule allows students whose balance is at or below its threshold. Set the school&apos;s current term in School details to use term-scoped rules.</p>
-      <form className="settings-form clearance-rule-form" onSubmit={save}>
+      {canManage && <form className="settings-form clearance-rule-form" onSubmit={save}>
         <label>Maximum balance<input type="number" min="0" step="0.01" value={form.threshold} onChange={(event) => setForm({ ...form, threshold: event.target.value })} required /></label>
         <label>Class scope (optional)<input maxLength={64} value={form.className} onChange={(event) => setForm({ ...form, className: event.target.value })} /></label>
         <label>Term scope (optional)<input maxLength={64} value={form.term} onChange={(event) => setForm({ ...form, term: event.target.value })} /></label>
         <label>Expiry date (optional)<input type="date" value={form.expiresAt} onChange={(event) => setForm({ ...form, expiresAt: event.target.value })} /></label>
         <button className="button button-primary" type="submit" disabled={busy}>{busy ? "Saving..." : "Add threshold"}</button>
-      </form>
+      </form>}
       <div className="clearance-rule-list">
         {rules.length === 0 ? <p className="empty-inline">No active thresholds.</p> : rules.map((rule) => (
           <div className="clearance-rule-row" key={rule.id}>
             <span><strong>{rule.threshold}</strong><small>{[rule.class_name || "All classes", rule.term || "All terms", rule.expires_at ? `Until ${String(rule.expires_at).slice(0, 10)}` : "No expiry"].join(" · ")}</small></span>
-            <button type="button" onClick={() => remove(rule.id)} disabled={busy}>Remove</button>
+            {canManage && <button type="button" onClick={() => remove(rule.id)} disabled={busy}>Remove</button>}
           </div>
         ))}
       </div>

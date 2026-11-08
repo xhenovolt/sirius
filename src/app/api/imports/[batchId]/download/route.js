@@ -1,6 +1,6 @@
 import ExcelJS from "exceljs";
 import { NextResponse } from "next/server";
-import { getSession } from "@/lib/auth";
+import { requireSchoolPermission } from "@/lib/auth";
 import { getImportSourceFile, getImportVersionRows, ImportError } from "@/lib/imports";
 
 const columns = [
@@ -20,8 +20,8 @@ function safeFileName(value) {
 }
 
 export async function GET(request, { params }) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+  const session = await requireSchoolPermission("imports.view");
+  if (!session) return NextResponse.json({ error: "Permission to view imports is required." }, { status: 403 });
 
   const { batchId: rawBatchId } = await params;
   const batchId = Number(rawBatchId);

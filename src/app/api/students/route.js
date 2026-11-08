@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { createStudent, searchStudents, StudentInputError } from "@/lib/students";
-import { getSession } from "@/lib/auth";
+import { requireSchoolPermission } from "@/lib/auth";
 
 export async function GET(request) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+  const session = await requireSchoolPermission("students.view");
+  if (!session) return NextResponse.json({ error: "Permission to view student records is required." }, { status: 403 });
   const search = request.nextUrl.searchParams.get("search") || "";
 
   if (search.length > 100) {
@@ -19,8 +19,8 @@ export async function GET(request) {
 }
 
 export async function POST(request) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+  const session = await requireSchoolPermission("students.manage");
+  if (!session) return NextResponse.json({ error: "Permission to manage student records is required." }, { status: 403 });
 
   let body;
   try {
