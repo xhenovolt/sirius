@@ -666,3 +666,12 @@ remediation commits were made as part of this audit.
   regression test for no match, one match, and cross-school ambiguity.
 - `npm.cmd test`: passed, 53 tests. `npm.cmd run build` and `git diff --check`
   passed.
+
+## 2026-11-08 — School account dropdown and profile view
+
+- Replaced the navbar username's direct sign-out action with an accessible,
+  responsive account dropdown containing the signed-in user's name/email,
+  profile link, school settings link for administrators, and sign-out action.
+- Added a session-protected read-only profile page showing the user's school
+  membership and contact details. Control Center navigation remains separate.
+- Verified with the unit suite, production build, and `git diff --check`.
