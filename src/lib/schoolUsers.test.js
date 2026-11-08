@@ -20,6 +20,7 @@ test("the last active school administrator cannot be demoted", () => {
     action: "demote",
     actorId: 7,
     targetId: 9,
+    targetRole: "admin",
     targetIsAdmin: true,
     activeAdminCount: 1,
   });
@@ -33,8 +34,69 @@ test("an administrator may be demoted when another active administrator remains"
     action: "demote",
     actorId: 7,
     targetId: 9,
+    targetRole: "admin",
     targetIsAdmin: true,
     activeAdminCount: 2,
+  });
+
+  assert.deepEqual(result, { ok: true });
+});
+
+test("the last active administrator cannot be changed to a non-admin role", () => {
+  const result = schoolUserActionPolicy({
+    action: "set_role",
+    actorId: 7,
+    targetId: 9,
+    targetRole: "admin",
+    nextRole: "operator",
+    targetIsAdmin: true,
+    activeAdminCount: 1,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.status, 409);
+});
+
+test("only a school SuperAdmin can manage a SuperAdmin user", () => {
+  const result = schoolUserActionPolicy({
+    action: "delete",
+    actorId: 7,
+    targetId: 9,
+    targetRole: "superadmin",
+    targetIsSuperAdmin: true,
+    targetIsAdmin: true,
+    activeAdminCount: 2,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.status, 403);
+});
+
+test("only a school SuperAdmin can assign the SuperAdmin role", () => {
+  const result = schoolUserActionPolicy({
+    action: "set_role",
+    actorId: 7,
+    targetId: 9,
+    targetRole: "operator",
+    nextRole: "superadmin",
+    targetIsAdmin: false,
+    activeAdminCount: 1,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.status, 403);
+});
+
+test("school SuperAdmin can assign the Bursar role", () => {
+  const result = schoolUserActionPolicy({
+    action: "set_role",
+    actorId: 7,
+    targetId: 9,
+    targetRole: "operator",
+    nextRole: "bursar",
+    actorIsSuperAdmin: true,
+    targetIsAdmin: false,
+    activeAdminCount: 1,
   });
 
   assert.deepEqual(result, { ok: true });

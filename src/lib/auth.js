@@ -5,7 +5,11 @@ import { getDb } from "./db.js";
 import { queryTenant, withTenantTransaction } from "./dbTenant.js";
 import { assignRole, createSchoolWithSuperAdmin, findRoleId, superAdminSlug } from "./tenancy.js";
 import { checkCapacity } from "./entitlements.js";
-import { uniquePasswordResetUser } from "./passwordResetIdentity.js";
+import {
+  normalizeUgandaPhone,
+  passwordResetPhoneLookupValues,
+  uniquePasswordResetUser,
+} from "./passwordResetIdentity.js";
 
 const cookieName = "sirius_session";
 const sessionDays = 7;
@@ -145,6 +149,12 @@ function clientIp(request) {
  * from the caller's session, so a superadmin can only staff their own school.
  */
 export async function createUser({ schoolId, email, password, displayName, phone = "", roleSlug = "operator", createdBy = null }) {
+  const normalizedPhone = normalizeUgandaPhone(phone);
+  if (!normalizedPhone) {
+    const error = new Error("A valid Uganda mobile number is required for password recovery.");
+    error.code = "INVALID_USER_PHONE";
+    throw error;
+  }
   // One choke point for the `users` meter, so no create path can skip it.
   // A missing plan resolves to unlimited, so a brand-new school is never blocked.
   const over = await checkCapacity(schoolId, "users");
@@ -164,7 +174,7 @@ export async function createUser({ schoolId, email, password, displayName, phone
     const [result] = await scoped.query(
       `INSERT INTO users (school_id, email, phone, display_name, password_hash, role, status, created_by)
        VALUES (?, ?, ?, ?, ?, ?, 'active', ?)`,
-      [schoolId, String(email).toLowerCase(), phone, displayName, passwordHash, legacyRole, createdBy],
+      [schoolId, String(email).trim().toLowerCase(), normalizedPhone, displayName, passwordHash, legacyRole, createdBy],
     );
     const userId = result.insertId;
     const roleId = await findRoleId(scoped, schoolId, roleSlug);
@@ -180,7 +190,7 @@ export async function authenticate(email, password, request) {
        FROM users
       WHERE email = ? AND deleted_at IS NULL
       LIMIT 1`,
-    [String(email).toLowerCase()],
+    [String(email).trim().toLowerCase()],
   );
   const user = rows[0];
   if (!user || !(await bcrypt.compare(password, user.password_hash))) return null;
@@ -201,7 +211,7 @@ export async function authenticate(email, password, request) {
 
 /** Signup = a new school and its first SuperAdmin, auto-activated. */
 export async function signUpSchool({ schoolName, schoolCode = null, email, password, displayName, phone }, request) {
-  const normalizedPhone = phone ? normalizePhone(phone) : "";
+  const normalizedPhone = phone ? normalizeUgandaPhone(phone) : "";
   if (phone && !normalizedPhone) throw new Error("Use a valid Uganda mobile number.");
 
   const { schoolId, userId } = await createSchoolWithSuperAdmin({
@@ -274,23 +284,30 @@ export async function terminateUserSessions(userId, schoolId) {
   await queryTenant(schoolId, "DELETE FROM sessions WHERE user_id = ? AND school_id = ?", [userId, schoolId]);
 }
 
-function normalizePhone(phone) {
-  const value = String(phone || "").replace(/[\s()-]/g, "");
-  if (/^07\d{8}$/.test(value)) return `+256${value.slice(1)}`;
-  if (/^2567\d{8}$/.test(value)) return `+${value}`;
-  if (/^\+2567\d{8}$/.test(value)) return value;
-  return null;
-}
-
 function findIdentifier(identifier) {
   const value = String(identifier || "").trim().toLowerCase();
-  return { value, phone: normalizePhone(value) || value };
+  return { value, phone: normalizeUgandaPhone(value) };
 }
 
 async function findPasswordResetUser(value, phone) {
-  const [rows] = await getDb().query(
-    "SELECT id, phone, school_id FROM users WHERE (email = ? OR phone = ?) AND status = 'active' AND deleted_at IS NULL LIMIT 2",
-    [value, phone],
+  const db = getDb();
+  if (value.includes("@")) {
+    const [rows] = await db.query(
+      "SELECT id, phone, school_id FROM users WHERE email = ? AND status = 'active' AND deleted_at IS NULL LIMIT 2",
+      [value],
+    );
+    return uniquePasswordResetUser(rows);
+  }
+
+  const phoneValues = passwordResetPhoneLookupValues(phone || value);
+  if (!phoneValues.length) return null;
+  const [rows] = await db.query(
+    `SELECT id, phone, school_id
+       FROM users
+      WHERE REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '(', ''), ')', ''), '+', ''), '.', '') IN (?, ?)
+        AND status = 'active' AND deleted_at IS NULL
+      LIMIT 2`,
+    phoneValues,
   );
   return uniquePasswordResetUser(rows);
 }
@@ -306,6 +323,16 @@ async function sendSms(phone, message) {
     body,
   });
   if (!response.ok) throw new Error(`SMS provider returned ${response.status}`);
+  let result;
+  try {
+    result = await response.json();
+  } catch {
+    throw new Error("SMS provider returned an unreadable response.");
+  }
+  const recipients = result?.SMSMessageData?.Recipients;
+  if (!Array.isArray(recipients) || recipients.length === 0 || recipients.some((recipient) => recipient.status !== "Success")) {
+    throw new Error("SMS provider did not confirm delivery.");
+  }
 }
 
 /** Cryptographically random 6-digit code, compared in constant time. */
@@ -323,9 +350,11 @@ export async function requestPasswordReset(identifier) {
   const { value, phone } = findIdentifier(identifier);
   const user = await findPasswordResetUser(value, phone);
   if (!user) return;
+  const destination = normalizeUgandaPhone(user.phone);
+  if (!destination) return;
 
   const code = generateResetCode();
-  const created = await withTenantTransaction(user.school_id, async (scoped) => {
+  const resetCodeId = await withTenantTransaction(user.school_id, async (scoped) => {
     await scoped.query("SELECT id FROM users WHERE id = ? AND school_id = ? FOR UPDATE", [user.id, user.school_id]);
     const [recent] = await scoped.query(
       `SELECT id FROM password_reset_codes
@@ -339,15 +368,28 @@ export async function requestPasswordReset(identifier) {
       "UPDATE password_reset_codes SET used_at = CURRENT_TIMESTAMP WHERE school_id = ? AND user_id = ? AND used_at IS NULL",
       [user.school_id, user.id],
     );
-    await scoped.query(
+    const [result] = await scoped.query(
       `INSERT INTO password_reset_codes (school_id, user_id, code_hash, expires_at)
        VALUES (?, ?, ?, DATE_ADD(CURRENT_TIMESTAMP, INTERVAL ? MINUTE))`,
       [user.school_id, user.id, hashToken(code), resetCodeMinutes],
     );
-    return true;
+    return result.insertId;
   });
-  if (!created) return;
-  await sendSms(user.phone, `Sirius by Xhenvolt: your password reset code is ${code}. It expires in ${resetCodeMinutes} minutes.`);
+  if (!resetCodeId) return;
+  try {
+    await sendSms(destination, `Sirius by Xhenvolt: your password reset code is ${code}. It expires in ${resetCodeMinutes} minutes.`);
+  } catch (error) {
+    try {
+      await queryTenant(
+        user.school_id,
+        "UPDATE password_reset_codes SET used_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ? AND school_id = ? AND used_at IS NULL",
+        [resetCodeId, user.id, user.school_id],
+      );
+    } catch (cleanupError) {
+      console.error("Failed to invalidate undelivered password reset code", cleanupError);
+    }
+    throw error;
+  }
 }
 
 export async function resetPassword(identifier, code, password) {

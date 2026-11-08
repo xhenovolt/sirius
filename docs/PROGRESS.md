@@ -675,3 +675,32 @@ remediation commits were made as part of this audit.
 - Added a session-protected read-only profile page showing the user's school
   membership and contact details. Control Center navigation remains separate.
 - Verified with the unit suite, production build, and `git diff --check`.
+
+## 2026-11-08 — School password recovery and SuperAdmin user controls
+
+### Done
+
+- Confirmed passwords do not automatically expire; school login sessions expire
+  after seven days. The sign-in page now makes that distinction clear, and
+  email login trims surrounding whitespace.
+- Password recovery now looks up email exactly or matches normalized Uganda
+  phone formats, checks the SMS provider's per-recipient delivery status, and
+  invalidates a reset code if delivery fails so a retry is not blocked by the
+  60-second outstanding-code throttle. The recovery form displays connection
+  errors and explains that a valid mobile number is needed.
+- Newly created and edited school users require a valid Uganda mobile number
+  for SMS password recovery.
+- School SuperAdmins can create and assign all seeded school roles, manage
+  other SuperAdmins and all school users, and reset user passwords. Non-
+  SuperAdmins cannot assign elevated roles or manage SuperAdmin accounts.
+  Self-removal and last-active-admin guards remain enforced.
+- User removal disables the account, ends its sessions, retains the record for
+  audit/history, and excludes it from the active user list.
+- Disabled the legacy bootstrap endpoint, which hard-coded a `default` tenant;
+  school provisioning remains through signup.
+
+### Verification
+
+- `npm.cmd test`: passed, 61 tests, including phone normalization, role
+  authorization, active-list removal, soft-delete, and session revocation.
+- `npm.cmd run build` and `git diff --check`: passed.

@@ -4,6 +4,7 @@ import { queryTenant } from "@/lib/dbTenant";
 import { getSchoolSettings, getUsers } from "@/lib/students";
 import { recordAuditLog } from "@/lib/audit";
 import { ASSIGNABLE_ROLES, performSchoolUserAction } from "@/lib/schoolUsers";
+import { normalizeUgandaPhone } from "@/lib/passwordResetIdentity";
 
 export async function GET() {
   const admin = await requireSchoolAdmin();
@@ -35,6 +36,7 @@ export async function PATCH(request) {
     const result = await performSchoolUserAction({
       schoolId: admin.school_id,
       actorId: admin.id,
+      actorIsSuperAdmin: admin.isSuperAdmin,
       userId,
       action: body.action,
       values: body,
@@ -46,7 +48,9 @@ export async function PATCH(request) {
       action: `user.${body.action}`,
       entityType: "user",
       entityId: String(userId),
-      details: body.action === "edit" ? { fields: ["displayName", "phone"] } : null,
+      details: body.action === "edit"
+        ? { fields: ["displayName", "phone"] }
+        : body.action === "set_role" ? { role: body.role } : null,
     });
     return NextResponse.json({ ok: true });
   } catch (error) { console.error("User action failed", error); return NextResponse.json({ error: "Unable to update user access." }, { status: 500 }); }
@@ -59,16 +63,27 @@ export async function POST(request) {
     const body = await request.json();
     if (typeof body.displayName !== "string" || !body.displayName.trim() || body.displayName.trim().length > 150
       || typeof body.email !== "string" || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(body.email.trim())
-      || typeof body.password !== "string" || body.password.length < 12) {
-      return NextResponse.json({ error: "A valid name and email, and a password of at least 12 characters are required." }, { status: 400 });
+      || typeof body.password !== "string" || body.password.length < 12
+      || typeof body.phone !== "string" || !normalizeUgandaPhone(body.phone)) {
+      return NextResponse.json({ error: "A valid name, email, Uganda mobile number, and password of at least 12 characters are required." }, { status: 400 });
     }
-    const role = ASSIGNABLE_ROLES.has(body.role) ? body.role : "operator";
+    const role = body.role == null ? "operator" : body.role;
+    if (typeof role !== "string" || !ASSIGNABLE_ROLES.has(role)) {
+      return NextResponse.json({ error: "Choose a valid school role." }, { status: 400 });
+    }
+    if (role === "superadmin" && !admin.isSuperAdmin) {
+      return NextResponse.json({ error: "Only a school SuperAdmin can create another SuperAdmin." }, { status: 403 });
+    }
+    if (!admin.isSuperAdmin && !["admin", "operator"].includes(role)) {
+      return NextResponse.json({ error: "Only a school SuperAdmin can assign that role." }, { status: 403 });
+    }
     await createUser({ schoolId: admin.school_id, email: body.email.trim(), password: body.password, displayName: body.displayName.trim(), phone: body.phone?.trim() || "", roleSlug: role, createdBy: admin.id });
     await recordAuditLog({ session: admin, request, action: "user.created", entityType: "user", entityId: body.email.trim(), details: { role } });
     return NextResponse.json({ created: true }, { status: 201 });
   } catch (error) {
     console.error("Admin user creation failed", error);
     if (error.code === "PLAN_LIMIT_REACHED") return NextResponse.json({ error: error.message, code: error.code, limit: error.limit }, { status: error.status });
+    if (error.code === "INVALID_USER_PHONE") return NextResponse.json({ error: error.message }, { status: 400 });
     return NextResponse.json({ error: error.code === "ER_DUP_ENTRY" ? "An account with that email already exists." : "Unable to create user account." }, { status: error.code === "ER_DUP_ENTRY" ? 409 : 500 });
   }
 }

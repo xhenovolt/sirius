@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-export default function SettingsForm({ school, users, currentUserId }) {
+export default function SettingsForm({ school, users, currentUserId, isSuperAdmin = false }) {
   const [form, setForm] = useState({
     schoolName: school.school_name || "",
     schoolCode: school.school_code || "",
@@ -68,6 +68,16 @@ export default function SettingsForm({ school, users, currentUserId }) {
     );
   }
 
+  function changeRole(user, role) {
+    if (role === (user.role_slug || user.role)) return;
+    void userAction(
+      user.id,
+      "set_role",
+      { role },
+      `Change ${user.display_name}'s role to ${role}?`,
+    );
+  }
+
   return (
     <div className="settings-grid">
       <section className="panel settings-panel">
@@ -105,11 +115,14 @@ export default function SettingsForm({ school, users, currentUserId }) {
           <span className="preview-count">{users.length} user{users.length === 1 ? "" : "s"}</span>
         </div>
         <div className="user-list">
+          {users.length === 0 && <p className="empty-inline">No active school users.</p>}
           {users.map((user) => {
             const isSelf = Number(user.id) === Number(currentUserId);
             const removed = Boolean(user.deleted_at);
             const enabled = user.status === "active" && !removed;
             const role = user.role_slug || user.role;
+            const isSuperAdminTarget = role === "superadmin";
+            const canManageTarget = !removed && (!isSuperAdminTarget || isSuperAdmin);
             return (
               <div className="user-row" key={user.id}>
                 <span className="avatar">{(user.display_name || "?").slice(0, 1).toUpperCase()}</span>
@@ -123,35 +136,47 @@ export default function SettingsForm({ school, users, currentUserId }) {
                       : user.last_seen_at ? `Offline · last seen ${new Date(user.last_seen_at).toLocaleString()}` : "Offline · never signed in"}
                   </small>
                 </span>
-                {!isSelf && !removed && (
+                {canManageTarget && (
                   <span className="user-actions">
                     <button type="button" onClick={() => editUser(user)}>Edit</button>
                     <button type="button" onClick={() => resetPassword(user)}>Reset password</button>
-                    <button
-                      type="button"
-                      onClick={() => userAction(user.id, role === "admin" || role === "superadmin" ? "demote" : "promote")}
-                    >
-                      {role === "admin" || role === "superadmin" ? "Demote" : "Promote"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => userAction(user.id, enabled ? "disable" : "enable")}
-                    >
-                      {enabled ? "Disable" : "Enable"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => userAction(user.id, "logout")}
-                      disabled={!Number(user.online_sessions || 0)}
-                    >
-                      Log out
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => userAction(user.id, "delete", {}, `Soft-delete ${user.display_name}? Their record will be retained and their sessions ended.`)}
-                    >
-                      Delete
-                    </button>
+                    {!isSelf && isSuperAdmin && (
+                      <label className="user-role-control">
+                        <span className="sr-only">Role for {user.display_name}</span>
+                        <select value={role} onChange={(event) => changeRole(user, event.target.value)}>
+                          <option value="superadmin">SuperAdmin</option>
+                          <option value="admin">Administrator</option>
+                          <option value="bursar">Bursar</option>
+                          <option value="operator">Operator</option>
+                        </select>
+                      </label>
+                    )}
+                    {!isSelf && !isSuperAdmin && ["admin", "operator"].includes(role) && (
+                      <button
+                        type="button"
+                        onClick={() => userAction(user.id, role === "admin" ? "demote" : "promote")}
+                      >
+                        {role === "admin" ? "Demote" : "Promote"}
+                      </button>
+                    )}
+                    {!isSelf && <>
+                      <button type="button" onClick={() => userAction(user.id, enabled ? "disable" : "enable")}>
+                        {enabled ? "Disable" : "Enable"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => userAction(user.id, "logout")}
+                        disabled={!Number(user.online_sessions || 0)}
+                      >
+                        Log out
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => userAction(user.id, "delete", {}, `Remove ${user.display_name} from this school? Their access and sessions will end; audit history will be retained.`)}
+                      >
+                        Remove
+                      </button>
+                    </>}
                   </span>
                 )}
               </div>
