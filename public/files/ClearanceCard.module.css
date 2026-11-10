@@ -1,0 +1,66 @@
+.card {
+  position: relative;
+  container-type: inline-size;
+  overflow: hidden;
+  border-radius: 10px;
+  color: #141414;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.el {
+  position: absolute;
+  box-sizing: border-box;
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+}
+
+.text > div {
+  width: 100%;
+  white-space: pre-wrap;
+}
+
+.image img,
+.fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* A QR needs a quiet zone: keep it on white, never on the card colour. */
+.qr {
+  display: flex;
+  padding: 3%;
+  background: #fff;
+}
+
+.qr img,
+.qr .fill {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  image-rendering: pixelated;
+}
+
+/* Editor-only guide, e.g. the area the school stamps by hand. */
+.guide {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0.25cqw dashed #2a3b9b;
+  color: #2a3b9b;
+  font-family: system-ui, sans-serif;
+}
+
+@media print {
+  .card {
+    border-radius: 0;
+  }
+
+  .guide {
+    display: none;
+  }
+}

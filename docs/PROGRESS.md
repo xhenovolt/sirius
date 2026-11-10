@@ -916,3 +916,151 @@ remediation commits were made as part of this audit.
 - Validation: `npm.cmd test` passed (71/71); `npm.cmd run build` passed;
   `git diff --check` passed. Production Control Center saving and QR issuance
   still need an operator session and deployment smoke test.
+
+## 2026-11-10 — Gate 0 verified; Phase 0 audit for shell + card engine
+
+### Gate 0: /cards works on production — PASS
+
+Evidence gathered read-only (no credentials used, no tokens printed):
+
+- `https://sirius-psi-three.vercel.app/login` and `/control/settings` return
+  200; unauthenticated `/cards` correctly redirects to `/login`.
+- The deployed production JS bundle contains the new Control Center
+  "Public website URL for QR codes" UI, so production runs code including
+  `7c2c54b` (the QR-origin fix).
+- Configured TiDB: `platform_settings.app_base_url` =
+  `https://sirius-psi-three.vercel.app`, saved 2026-11-08 12:36:53 UTC.
+- `qr_identities`: 13 rows, all active, latest `issued_at` 2026-11-08
+  12:37:55 UTC — one minute after the origin was saved. Issuance happens
+  inside `/cards`, so the page ran end-to-end successfully on the deployment
+  that writes to this database.
+- Live smoke test: fetched `/v/{token}` for the newest issued token without
+  logging the token; HTTP 200, "Verified student identity" and "Data as of"
+  present, invalid-token marker absent, `noindex` present.
+- Migrations: 15/15 applied (latest `015_school_role_permissions.sql`).
+
+Caveat: no authenticated browser session was available from this workspace,
+so the /cards HTML itself was not re-rendered under a login; the issuance
+records plus live verification page are the evidence. The earlier
+"Unable to prepare student cards" failure is resolved.
+
+### Phase 0 audit (read-only)
+
+Supplied references reviewed in `public/files/` (committed unchanged):
+`ClearanceCard.jsx` + CSS module (one renderer, %-positions, cqw font sizes,
+server-passed `qrSrc`, merge fields, print-aware guides), `jipraClassic.template.js`
+(1110x570 design units, ~107x55mm physical, fees hidden, non-printing stamp
+zone, required locked QR, synthetic sample data only), `page.jsx` (preview
+route generating the QR server-side with `qrcode`). The renderer/schema pair
+is coherent and adoptable; improvements needed: zod server validation,
+multi-side support, mm-based physical sizing, rich-text JSON, asset binding.
+
+Current state:
+
+- Nav/shell: school pages duplicate a `topbar` + `main-nav` header across 10
+  files (overview, students, student profile, import, cards, scan, settings,
+  profile, AccessDenied). No route groups; flat `src/app/*`. Settings crams
+  logo, users, roles, clearance rules, and audit onto one page. Control
+  Center already has a separate dark sidebar shell with role-aware nav,
+  mobile bottom nav + drawer, and client-side session check (APIs guarded).
+- Routes: `/`, `/students`, `/students/[studentUid]`, `/import` (singular,
+  one 550-line client), `/cards`, `/scan`, `/verify/[studentUid]` (retired
+  legacy), `/v/[token]`, `/settings`, `/profile`, auth pages, `/control/*`.
+  Missing vs target: students/new, imports/* (history/new/batch/grid/files),
+  cards/designer, cards/preview, cards/batches, clearance/*, verify + log,
+  settings split (school/users/roles/audit). No loading.jsx/error.jsx
+  anywhere; errors are generic empty states.
+- Cards flow: `/cards` server page resolves session + `cards.view`, reads
+  platform URL (env fallback), loads students/school/templates, issues
+  opaque-token identities, builds verify URLs. `QrCards.js` generates QR
+  data-URLs CLIENT-side (spec requires server-side) and renders a simple
+  field-list card. Template system: one `card_templates` table keyed by
+  (school_id, template_name, version), append-only versions, hand-rolled
+  allowlist schema (title, size, 2 colors, field list). No publish/draft
+  distinction, no assets table, no issue-to-version recording.
+- Data: students have account_no, names, gender, class, stream, photo,
+  parent, fee_balance, version. NO student `type` (DAY/BOARDING) column —
+  the Jipra card needs it; the sample import's `stdtype`/`status` headers
+  are still unmapped. `schools.current_term` is one VARCHAR(64); the card
+  wants academic year + term name. `contact_phone` is one field; the card
+  shows two tel numbers. Baseline `schema.sql` is stale vs migrations
+  (still `admission_number`, global UID unique); live DB is correct.
+- Permissions: catalog of 12 school permissions; `cards.manage` = design
+  templates (admin only by default; bursar/operator have cards.view only).
+  Server-side enforcement exists per page/API via `hasSchoolPermission`.
+- Dependencies: next 16.3.4 (bundled docs in node_modules/next/dist/docs —
+  read before writing code per agents.md), react 19.2.8, qrcode, mysql2,
+  exceljs, cloudinary (photos/logo), html5-qrcode, sweetalert2, tailwind 4.
+  No zod, no manipulation/rich-text libraries yet.
+- Images: student photos and school logo already go to Cloudinary (object
+  storage, no local disk). Spec names Vercel Blob/S3/R2 — decision below.
+
+### Verification
+
+- `npm.cmd test`: 71/71 pass. `npm.cmd run build`: pass (route table
+  inspected). `git diff --check`: clean. No database writes; all DB checks
+  read-only. No source changes; references + this report only.
+
+### Plan (gated; each phase ends with evidence + STOP)
+
+1. **Sidebar shell + route skeletons.** `(app)` group with collapsible
+   sidebar/drawer, role-aware items, minimal top bar; `(public)` for login
+   + `/v/[token]`; `/control` keeps its shell. All target routes created
+   with loading/error/empty states, reusing existing logic. Acceptance:
+   every route renders for an authorized role, 403 for unauthorized
+   (server-enforced), mobile drawer works, build+tests green.
+2. **Renderer + schema + Jipra preset + preview + issuance.** Adopt
+   reference renderer (one renderer for canvas/preview/print), zod schema
+   (whitelisted elements, merge-field whitelist, size/count limits,
+   sensitive fields gated), server-side QR, new tables
+   (card_templates/card_template_versions/card_assets/card_issues),
+   publish=immutable, issues record version. Acceptance: /cards/preview
+   matches the paper card side-by-side with synthetic data; real issuance
+   works on production; fees never render by default.
+3. **Designer MVP.** Select/move/resize (react-moveable), text edit
+   (Tiptap restricted JSON), merge-field insert, image upload, required
+   QR, draft autosave, publish, undo/redo. Acceptance: edit→publish→issue
+   round-trip on production; XSS-safe rich text; tests green.
+4. **Designer depth.** Toolbar, snapping/guides/rulers, layers, versions,
+   sides, size presets, overflow warnings, student-picker preview.
+5. **Batch print/export.** N-up sheets with crop marks, mm units; PDF
+   decision (browser print first; server PDF only within Vercel limits).
+6. **Hardening.** Schema tests, Playwright visual regression, tenant leak
+   tests for templates/assets, a11y, ~50-element performance.
+
+### Dependency proposals (justify at gate)
+
+- `zod` — server-side template schema validation, the spec's explicit ask.
+- `react-moveable` + `react-selecto` — DOM drag/resize/rotate + marquee
+  multi-select; avoids hand-rolling geometry, keeps print-faithful DOM.
+- `@tiptap/react` + `@tiptap/starter-kit` (restricted marks/nodes) —
+  rich text edited in place, stored as validated JSON, never raw HTML.
+- Images: recommend keeping Cloudinary (already integrated, tenant-scoped
+  uploads, no local disk) for card assets too, rather than adding Vercel
+  Blob — one storage integration, EXIF stripping done server-side before
+  upload. Alternative: Vercel Blob if the spec's storage list is strict.
+- PDF: browser print first (no new deps); server-side PDF deferred unless
+  it fits Vercel limits without headless Chromium.
+
+### Questions (answers needed before/at Phase 1–2 gates)
+
+1. Exact physical card size? Preset guesses 107x55mm (~1.95:1). Single
+   face or true bifold — what is on the back?
+2. Fonts on the paper card? Reference uses a Times/serif stack; confirm or
+   supply the actual fonts (must be self-hosted/vetted).
+3. Who may edit and publish templates? Current `cards.manage` is
+   admin-only by default; should bursars design/publish too?
+4. Printer and stock: pre-coloured pink paper or white A4 sheets N-up?
+   Lamination margin ≥3mm assumed — confirm.
+5. Does the school insist on a printed fees balance? Default: hidden.
+6. `stdtype`/`status` import semantics: is `stdtype` DAY/BOARDING? Adding a
+   `student_type` column is needed for the Jipra "Type (DAY)" line.
+7. Term/tel data: store structured term (year + name) and a second phone
+   number on the school, or parse the existing single fields?
+8. Asset storage: keep Cloudinary for card assets (recommended) or move to
+   Vercel Blob/S3/R2 per the spec's list?
+
+### Next
+
+STOP gate. Await answers/approval before Phase 1 (sidebar shell + route
+skeletons). No designer work until Gate 0 stayed green — it is green.
