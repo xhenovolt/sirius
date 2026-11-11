@@ -1064,3 +1064,70 @@ Current state:
 
 STOP gate. Await answers/approval before Phase 1 (sidebar shell + route
 skeletons). No designer work until Gate 0 stayed green — it is green.
+
+---
+
+## Phase 0 answers (binding)
+
+The user resolved the open questions as runtime choices, not code defaults:
+1. Front/back vs front-only — the user chooses at runtime.
+2. Fonts — the user chooses.
+3. Who edits/publishes — SuperAdmin decides.
+4. Printer/stock — the user decides.
+5. Printed fees balance — the user decides (default remains hidden).
+6. `stdtype` = DAY / BOARDING.
+7. Add a structured term and a second phone; display is user-decided.
+8. Asset storage — keep Cloudinary.
+Core principle: the user must be able to select which cards to print and
+edit anything, which is why the sidebar is deliberately broad.
+
+## Phase 1 — sidebar app shell + route skeletons
+
+### Delivered
+- Route groups: `src/app/(app)` (authenticated sidebar shell), `(public)`
+  (login, signup, about, docs, password reset, `/v/[token]`), `/control`
+  (separate Control Center shell). One root layout.
+- Shell: `src/components/shell/AppShell.js` — collapsible desktop sidebar
+  (localStorage), mobile drawer (Escape, overlay, body scroll lock, focus
+  management), active-route highlighting, auto-open active group, role-aware
+  menu filtered server-side in `nav.js`, breadcrumbs, account menu.
+- Shell building blocks: `ShellIcon`, `PageHeader`, `EmptyState`,
+  `RouteLoading`, `RouteError` (classified via `src/lib/errors.js`),
+  `AccessDenied`, `global-error.js`.
+- Server-side permission enforcement on every `(app)` page; unauthorized
+  roles render `AccessDenied`, never the page body.
+- Routes now reachable: `/`, `/students`, `/students/new`, `/students/[id]`,
+  `/imports`, `/imports/new`, `/imports/[batchId]`,
+  `/imports/[batchId]/grid` (redirects to the review grid), `/imports/files`,
+  `/cards`, `/cards/designer`, `/cards/designer/[templateId]`,
+  `/cards/preview`, `/cards/batches/[id]`, `/clearance`,
+  `/clearance/allowances`, `/clearance/thresholds`, `/verify`,
+  `/verify/log`, `/settings/{school,users,roles,audit}`, `/profile`.
+- Legacy `/import` → `/imports/new`, `/scan` → `/verify` redirects.
+- Tenant-scoped data helpers: `listSchoolAllowances`, `listScanEvents`,
+  `getClearanceSummary` in `src/lib/clearance.js`.
+- Settings split: school details, users panel, roles, audit as separate
+  pages; the combined SettingsForm was split into `SchoolDetailsForm` and
+  `UsersPanel`.
+- Shell/skeleton/print CSS added to `globals.css` (forest-green sidebar,
+  mint accents, print hides shell chrome).
+
+### Scaffolds (honest stubs, land in later phases)
+- `/cards/designer` lists real templates; the WYSIWYG editor is Phase 3.
+- `/cards/preview` (Phase 2 renderer), `/cards/batches/[id]` (Phase 5 print
+  batches) are informational scaffolds with links to working pages.
+
+### Evidence
+- `npm test` — 78 pass, 0 fail.
+- `npm run build` — succeeds; all routes compile (static + dynamic list
+  captured in the build output).
+
+### Still open for the Phase 1 gate
+- Add per-route `loading.jsx` / `error.jsx` files wired to `RouteLoading` /
+  `RouteError` (components exist).
+- Browser smoke test at desktop and mobile widths with a seeded session.
+- Then STOP at the Phase 1 gate.
+
+### Next
+Phase 2: shared renderer + zod schema + Jipra Classic preset + live preview
++ published-version issuance and the card data-model tables.

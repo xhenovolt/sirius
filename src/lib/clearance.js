@@ -194,3 +194,64 @@ export async function getVerificationResult(token, { session = null, ipAddress =
     isFullRecord,
   };
 }
+
+export async function listSchoolAllowances(schoolId, limit = 100) {
+  const [rows] = await queryTenant(
+    schoolId,
+    `SELECT a.id, a.allowed_until, a.reason, a.granted_at,
+            s.full_name, s.student_uid, s.class_name,
+            u.display_name AS granted_by_name
+       FROM clearance_allowances a
+       JOIN students s ON s.id = a.student_id AND s.school_id = a.school_id
+       LEFT JOIN users u ON u.id = a.granted_by AND u.school_id = a.school_id
+      WHERE a.school_id = ? AND a.revoked_at IS NULL AND a.allowed_until >= ?
+      ORDER BY a.allowed_until DESC, a.granted_at DESC
+      LIMIT ?`,
+    [schoolId, kampalaDate(), limit],
+  );
+  return rows;
+}
+
+export async function listScanEvents(schoolId, limit = 100) {
+  const [rows] = await queryTenant(
+    schoolId,
+    `SELECT e.id, e.outcome, e.ip_address, e.created_at,
+            s.full_name, s.student_uid
+       FROM scan_events e
+       LEFT JOIN students s ON s.id = e.student_id AND s.school_id = e.school_id
+      WHERE e.school_id = ?
+      ORDER BY e.created_at DESC, e.id DESC
+      LIMIT ?`,
+    [schoolId, limit],
+  );
+  return rows;
+}
+
+export async function getClearanceSummary(schoolId) {
+  const today = kampalaDate();
+  const [allowances, thresholds, scans] = await Promise.all([
+    queryTenant(
+      schoolId,
+      `SELECT COUNT(*) AS n FROM clearance_allowances
+        WHERE school_id = ? AND revoked_at IS NULL AND allowed_until >= ?`,
+      [schoolId, today],
+    ),
+    queryTenant(
+      schoolId,
+      `SELECT COUNT(*) AS n FROM clearance_threshold_rules
+        WHERE school_id = ? AND is_active = 1 AND (expires_at IS NULL OR expires_at >= ?)`,
+      [schoolId, today],
+    ),
+    queryTenant(
+      schoolId,
+      `SELECT COUNT(*) AS n FROM scan_events
+        WHERE school_id = ? AND created_at >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 1 DAY)`,
+      [schoolId],
+    ),
+  ]);
+  return {
+    activeAllowances: Number(allowances[0][0]?.n || 0),
+    activeThresholds: Number(thresholds[0][0]?.n || 0),
+    scansLast24h: Number(scans[0][0]?.n || 0),
+  };
+}
