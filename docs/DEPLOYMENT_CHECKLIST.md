@@ -22,7 +22,7 @@ must not be treated as production-ready evidence.
 
 - [ ] Provision a dedicated disposable TiDB database using the same TiDB version
       and settings as production.
-- [ ] Run migrations 001-012 against that test database; verify the migration
+- [ ] Run migrations 001-016 against that test database; verify the migration
       ledger, expected schema, and safe repeat behavior. The migration runner
       reads `.env.local` and applies every unapplied migration, so verify the
       target before running `npm.cmd run migrate`.
@@ -81,6 +81,11 @@ must not be treated as production-ready evidence.
       title to a student field; save a new version, reopen it, and confirm the
       layout persists. Verify `/cards/designer/{templateId}` opens the selected
       school template only.
+- [ ] Apply migration 016 before importing student type data. Start from the
+      Jipra temporary or permanent clearance design, save it as a school
+      template, and print the matching report. Temporary reports include
+      currently allowed students; permanent reports include students whose
+      computed verdict is CLEARED. No fee balance is available on either card.
 - [ ] Reprint previously issued cards that still encode the retired
       `/verify/{student_uid}` format.
 

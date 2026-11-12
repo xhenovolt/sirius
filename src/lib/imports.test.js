@@ -20,6 +20,7 @@ test("normalizeRow maps spreadsheet column names onto student fields", () => {
     gender: "Female",
     class_name: "Form 2",
     stream: "",
+    student_type: "",
     photo_url: "",
     parent_name: "",
     parent_phone: "+254700000001",
@@ -40,6 +41,16 @@ test("normalizeRow prefers the first alias that carries a value", () => {
   const row = normalizeRow({ admission_number: "", admission: "A-2" });
 
   assert.equal(row.student_account_no, "A-2");
+});
+
+test("normalizeRow maps stdtype and validates day or boarding classifications", () => {
+  const row = normalizeRow({ student_account_no: "A-10", first_name: "Mina", last_name: "Njoroge", stdtype: "day" });
+  assert.equal(row.student_type, "DAY");
+  assert.deepEqual(validateRow({ ...row, student_account_no: "A-10", first_name: "Mina", last_name: "Njoroge" }), []);
+  assert.deepEqual(
+    validateRow({ student_account_no: "A-10", first_name: "Mina", last_name: "Njoroge", student_type: "HOSTEL" }),
+    ["student type must be DAY or BOARDING"],
+  );
 });
 
 test("normalizeRow accepts fee balance headers and normalizes exact decimals", () => {

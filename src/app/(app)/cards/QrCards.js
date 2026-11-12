@@ -2,7 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
-import { cardElementDefaults, cardFields, defaultCardTemplate } from "@/lib/cardTemplateSchema";
+import {
+  cardElementDefaults,
+  cardFields,
+  clearanceCardPresets,
+  defaultCardTemplate,
+} from "@/lib/cardTemplateSchema";
 
 const TITLE_SOURCE_OPTIONS = [
   ["custom", "Custom title"],
@@ -11,6 +16,7 @@ const TITLE_SOURCE_OPTIONS = [
   ["student_account_no", "Student account number"],
   ["class_name", "Class"],
   ["stream", "Stream"],
+  ["student_type", "Student type"],
 ];
 
 function newestTemplate(templates) {
@@ -24,10 +30,13 @@ function fieldLabel(key) {
 
 function getFieldValue(field, student, school) {
   if (field === "school_name") return school?.school_name || "School name";
+  if (field === "school_term") return school?.current_term ? `TERM | ${school.current_term}` : "Current term";
+  if (field === "school_phone") return school?.contact_phone ? `Tel: ${school.contact_phone}` : "School phone";
   if (field === "full_name") return student.full_name || "Student name";
   if (field === "student_account_no") return student.student_account_no || "Student number";
   if (field === "class_name") return `Class: ${student.class_name || "Not set"}`;
   if (field === "stream") return `Stream: ${student.stream || "Not set"}`;
+  if (field === "student_type") return `Type: ${student.student_type || "Not set"}`;
   return "";
 }
 
@@ -49,7 +58,8 @@ function constrainElement(element) {
 export default function QrCards({ students, school, templates: savedTemplates, canManage, selectedTemplateId }) {
   const [codes, setCodes] = useState({});
   const [templates, setTemplates] = useState(savedTemplates);
-  const initialTemplate = savedTemplates.find((item) => item.id === selectedTemplateId) || newestTemplate(savedTemplates);
+  const initialTemplate = savedTemplates.find((item) => item.id === selectedTemplateId)
+    || newestTemplate(savedTemplates.filter((item) => item.template.cardType === "general"));
   const [templateName, setTemplateName] = useState(initialTemplate?.name || "Standard identity card");
   const [selectedVersionId, setSelectedVersionId] = useState(initialTemplate?.id || "");
   const [template, setTemplate] = useState(initialTemplate?.template || defaultCardTemplate);
@@ -121,6 +131,16 @@ export default function QrCards({ students, school, templates: savedTemplates, c
     setTemplate(saved.template);
     setSelectedField("title");
     setMessage(`Loaded ${saved.name}, version ${saved.version}.`);
+  }
+
+  function selectPreset(name) {
+    const preset = clearanceCardPresets.find((item) => item.name === name);
+    if (!preset) return;
+    setTemplateName(preset.name);
+    setSelectedVersionId("");
+    setTemplate(preset.template);
+    setSelectedField("title");
+    setMessage(`${preset.name} loaded. Save it as a school template to reuse it.`);
   }
 
   function toggleField(key, checked) {
@@ -242,8 +262,14 @@ export default function QrCards({ students, school, templates: savedTemplates, c
         : getFieldValue(template.titleField, student, school);
     }
     if (field === "school_name" || field === "full_name" || field === "student_account_no"
-      || field === "class_name" || field === "stream") {
+      || field === "school_term" || field === "school_phone" || field === "class_name"
+      || field === "stream" || field === "student_type") {
       return getFieldValue(field, student, school);
+    }
+    if (field === "school_logo") {
+      return school?.logo_url
+        ? <img className="card-element-school-logo" src={school.logo_url} alt={`${school.school_name || "School"} logo`} />
+        : <span className="card-element-logo-placeholder">LOGO</span>;
     }
     if (field === "photo_url") {
       return student.photo_url
@@ -254,6 +280,19 @@ export default function QrCards({ students, school, templates: savedTemplates, c
       return codes[student.student_uid]
         ? <img className="card-element-qr" src={codes[student.student_uid]} alt={`Verification QR code for ${student.full_name || "student"}`} />
         : <span className="qr-loading">QR code</span>;
+    }
+    if (field === "clearance_deadline") {
+      return student.clearance_deadline
+        ? `Deadline: ${student.clearance_deadline}`
+        : "Deadline: __________________";
+    }
+    if (field === "issued_on") return `Issued: ${student.issued_on || "________________"}`;
+    if (field === "signature_line") return "Sign: ................................";
+    if (field === "accounts_department") return "(Accounts Dept.)";
+    if (field === "clearance_stamp") {
+      return student.clearance_verdict === "CLEARED" || (designer && template.cardType === "permanent")
+        ? "CLEARED"
+        : "ALLOWED";
     }
     return null;
   }
@@ -328,7 +367,11 @@ export default function QrCards({ students, school, templates: savedTemplates, c
     student_account_no: "STU-001",
     class_name: "Primary 4",
     stream: "Blue",
+    clearance_verdict: template.cardType === "permanent" ? "CLEARED" : "ALLOWED",
   };
+  const reportStudents = template.cardType === "general"
+    ? students
+    : students.filter((student) => student.clearance_report_type === template.cardType);
   const inputClass = "card-designer-property-input";
 
   return (
@@ -347,7 +390,20 @@ export default function QrCards({ students, school, templates: savedTemplates, c
               </select>
             </label>
           )}
+          <label>Start from a clearance design
+            <select value="" onChange={(event) => selectPreset(event.target.value)} disabled={busy}>
+              <option value="">Choose a starting template</option>
+              {clearanceCardPresets.map((preset) => <option value={preset.name} key={preset.name}>{preset.name}</option>)}
+            </select>
+          </label>
           <label>Template name<input value={templateName} maxLength={100} onChange={(event) => changeTemplateName(event.target.value)} disabled={busy || !canManage} /></label>
+          <label>Template type
+            <select value={template.cardType} onChange={(event) => updateTemplate({ cardType: event.target.value })} disabled={busy}>
+              <option value="general">General student card</option>
+              <option value="temporary">Temporary clearance</option>
+              <option value="permanent">Permanent clearance</option>
+            </select>
+          </label>
           <label>Card width (mm)<input type="number" min="50" max="150" step="1" value={template.widthMm} onChange={(event) => updateTemplate({ widthMm: Number(event.target.value) })} disabled={busy} /></label>
           <label>Card height (mm)<input type="number" min="30" max="100" step="1" value={template.heightMm} onChange={(event) => updateTemplate({ heightMm: Number(event.target.value) })} disabled={busy} /></label>
           <label>Accent color<input type="color" value={template.accentColor} onChange={(event) => updateTemplate({ accentColor: event.target.value })} disabled={busy} /></label>
@@ -434,19 +490,21 @@ export default function QrCards({ students, school, templates: savedTemplates, c
         </div>
         <div className="card-template-actions">
           {canManage
-            ? <button className="button button-primary" type="button" onClick={saveTemplate} disabled={busy || !templateName.trim()}>{busy ? "Saving..." : "Save new version"}</button>
+            ? <button className="button button-primary" type="button" onClick={saveTemplate} disabled={busy || !templateName.trim()}>{busy ? "Saving..." : "Save template / version"}</button>
             : <span>Only school admins can save templates.</span>}
           {message && <p className="settings-message" role="status">{message}</p>}
         </div>
       </section>
       {students.length > 0 && (
-        <>
-          <div className="card-actions"><span>{students.length} cards ready</span><button className="button button-primary" type="button" onClick={() => window.print()}>Print / Save PDF <span>↗</span></button></div>
-          <div
-            className="qr-grid"
-            style={{ "--card-width": `${template.widthMm}mm`, "--card-height": `${template.heightMm}mm` }}
-          >{students.map((student) => renderCard(student))}</div>
-        </>
+        reportStudents.length === 0
+          ? <div className="empty-state"><strong>No students match this clearance report.</strong><p>Temporary reports include students currently allowed by an allowance or threshold. Permanent reports include students marked CLEARED.</p></div>
+          : <>
+            <div className="card-actions"><span>{reportStudents.length} {template.cardType === "general" ? "cards" : `${template.cardType} clearance cards`} ready</span><button className="button button-primary" type="button" onClick={() => window.print()}>Print / Save PDF <span>↗</span></button></div>
+            <div
+              className="qr-grid"
+              style={{ "--card-width": `${template.widthMm}mm`, "--card-height": `${template.heightMm}mm` }}
+            >{reportStudents.map((student) => renderCard(student))}</div>
+          </>
       )}
     </>
   );

@@ -1,4 +1,5 @@
-import { getSchoolSettings, getStudentsForCards } from "@/lib/students";
+import { getSchoolSettings } from "@/lib/students";
+import { getStudentsForClearanceCards } from "@/lib/clearance";
 import QrCards from "./QrCards";
 import { getSession, hasSchoolPermission } from "@/lib/auth";
 import { buildScanUrl, getAppBaseUrl, issueIdentitiesForStudents } from "@/lib/identity";
@@ -33,7 +34,7 @@ export default async function CardsPage() {
     failingStep = "app_base_url";
     appBaseUrl = getAppBaseUrl(configuredAppBaseUrl || process.env.APP_BASE_URL);
     [students, school, templates] = await Promise.all([
-      cardStep("student_query", getStudentsForCards(session.school_id)),
+      cardStep("student_query", getStudentsForClearanceCards(session.school_id)),
       cardStep("school_settings_query", getSchoolSettings(session.school_id)),
       cardStep("card_templates_query", listCardTemplates(session.school_id)),
     ]);

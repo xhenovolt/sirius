@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS students (
   gender VARCHAR(32) NULL,
   class_name VARCHAR(64) NULL,
   stream VARCHAR(64) NULL,
+  student_type VARCHAR(32) NULL,
   photo_url VARCHAR(500) NULL,
   parent_name VARCHAR(205) NULL,
   parent_phone VARCHAR(32) NULL,

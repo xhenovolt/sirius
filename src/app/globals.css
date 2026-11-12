@@ -258,7 +258,11 @@ a.shell-link { text-decoration: none; }
 .card-element { position: absolute; display: block; overflow: hidden; box-sizing: border-box; line-height: 1.15; overflow-wrap: anywhere; }
 .card-element-title { font-weight: 750; line-height: 1.05; }
 .card-element-school_name { font-weight: 650; }
+.card-element-school_logo { display: flex; align-items: center; justify-content: center; }
+.card-element-school-logo { display: block; width: 100%; height: 100%; object-fit: contain; }
+.card-element-logo-placeholder { display: grid; place-items: center; width: 100%; height: 100%; border: 1px dashed currentColor; font-size: 7px; }
 .card-element-full_name { font-weight: 750; line-height: 1.05; }
+.card-element-clearance_stamp { display: grid; place-items: center; border: 2px solid currentColor; border-radius: 4px; font-weight: 800; letter-spacing: .04em; transform: rotate(-8deg); }
 .card-element-photo_url, .card-element-qr_code { display: flex; align-items: center; justify-content: center; }
 .card-element-photo_url { border-radius: 3px; overflow: hidden; }
 .card-element-photo_url .card-element-initial { display: grid; place-items: center; width: 100%; height: 100%; background: #e5f0eb; color: #43846a; font-weight: 700; }

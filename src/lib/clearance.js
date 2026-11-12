@@ -56,6 +56,7 @@ export function computeClearance({
       verdict: "ALLOWED",
       reason: "Balance is within the active threshold.",
       threshold: String(applicableRule.threshold),
+      allowedUntil: applicableRule.expires_at ? dateOnly(applicableRule.expires_at) : null,
       basis: "threshold",
     };
   }
@@ -63,6 +64,80 @@ export function computeClearance({
     return { verdict: "CLEARED", reason: "No outstanding fee balance.", basis: "zero-balance" };
   }
   return { verdict: "NOT CLEARED", reason: "Outstanding fee balance exceeds the applicable threshold.", basis: "balance" };
+}
+
+export async function getStudentsForClearanceCards(schoolId) {
+  const today = kampalaDate();
+  const [studentResult, allowanceResult, ruleResult] = await Promise.all([
+    queryTenant(
+      schoolId,
+      `SELECT s.id, s.student_uid, s.student_account_no, s.full_name, s.class_name,
+              s.stream, s.student_type, s.photo_url, s.fee_balance,
+              sc.school_name, sc.contact_phone, sc.logo_url, sc.current_term
+         FROM students s
+         JOIN schools sc ON sc.school_id = s.school_id
+        WHERE s.school_id = ? AND s.status = 'active'
+        ORDER BY s.full_name ASC
+        LIMIT 500`,
+      [schoolId],
+    ),
+    queryTenant(
+      schoolId,
+      `SELECT student_id, allowed_until, reason, granted_by, granted_at, revoked_at
+         FROM clearance_allowances
+        WHERE school_id = ? AND revoked_at IS NULL AND allowed_until >= ?
+        ORDER BY allowed_until DESC, granted_at DESC`,
+      [schoolId, today],
+    ),
+    queryTenant(
+      schoolId,
+      `SELECT threshold, class_name, term, expires_at
+         FROM clearance_threshold_rules
+        WHERE school_id = ? AND is_active = 1
+          AND (expires_at IS NULL OR expires_at >= ?)`,
+      [schoolId, today],
+    ),
+  ]);
+  const [students] = studentResult;
+  const [allowances] = allowanceResult;
+  const [rules] = ruleResult;
+  const allowanceByStudent = new Map();
+  for (const allowance of allowances) {
+    if (!allowanceByStudent.has(String(allowance.student_id))) {
+      allowanceByStudent.set(String(allowance.student_id), allowance);
+    }
+  }
+  return students.map((student) => {
+    const clearance = computeClearance({
+      balance: student.fee_balance,
+      currentDate: today,
+      allowance: allowanceByStudent.get(String(student.id)) || null,
+      rules,
+      className: student.class_name,
+      currentTerm: student.current_term,
+    });
+    const reportType = clearance.verdict === "CLEARED"
+      ? "permanent"
+      : clearance.verdict === "ALLOWED" ? "temporary" : null;
+    return {
+      id: student.id,
+      student_uid: student.student_uid,
+      student_account_no: student.student_account_no,
+      full_name: student.full_name,
+      class_name: student.class_name,
+      stream: student.stream,
+      student_type: student.student_type,
+      photo_url: student.photo_url,
+      school_name: student.school_name,
+      contact_phone: student.contact_phone,
+      school_logo_url: student.logo_url,
+      current_term: student.current_term,
+      clearance_report_type: reportType,
+      clearance_verdict: clearance.verdict,
+      clearance_deadline: clearance.allowedUntil || "",
+      issued_on: today,
+    };
+  });
 }
 
 async function writeScanEvent({ identity, outcome, ipAddress, userAgent, studentId = null }) {

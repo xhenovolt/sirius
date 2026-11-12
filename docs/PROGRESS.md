@@ -1160,3 +1160,23 @@ Phase 2: shared renderer + zod schema + Jipra Classic preset + live preview
   its stored percentage coordinates, resizing changed its width/height
   properties, and selecting Student name changed the title preview to the
   sample student's name.
+
+## 2026-11-12 — Temporary and permanent clearance card templates
+
+- Added reusable Jipra temporary and permanent clearance design presets based
+  on the supplied reference images. Both are school-saveable, versioned
+  templates; existing schools can continue creating additional custom
+  templates. The designs use each school's logo and each student's stored
+  photo rather than copying personal photos from the reference images.
+- Temporary report cards include students whose current read-time clearance
+  verdict is ALLOWED and show the allowance/threshold expiry when present.
+  Permanent report cards include students whose current verdict is CLEARED.
+  The report data is computed on the server in Africa/Kampala time and the
+  balance is not sent to the card UI or available as a template component.
+- Added the imported `stdtype`/student-type field, DAY/BOARDING validation,
+  import diff/commit handling, baseline schema column, and idempotent migration
+  016. Apply migrations before importing this field on an existing deployment.
+- Validation: all 82 automated tests pass and `npm.cmd run build` passes.
+  Authenticated end-to-end template saving and physical print/PDF checks remain
+  deployment acceptance checks; no production DB migration or deployment was
+  run in this task.

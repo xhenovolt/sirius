@@ -13,6 +13,7 @@ export const fieldAliases = {
   gender: ["gender", "sex", "Gender"],
   class_name: ["class_name", "class", "class name", "grade", "year level", "Class"],
   stream: ["stream", "section", "house", "Stream"],
+  student_type: ["student_type", "student type", "stdtype", "student category", "type"],
   photo_url: ["photo_url", "photo", "photo url", "profile photo", "image url", "Photo"],
   parent_name: ["parent_name", "parent", "parent name", "guardian name", "Parent Name"],
   parent_phone: ["parent_phone", "parentPhone", "parent phone", "guardian phone", "contact number", "Parent Phone"],
@@ -28,6 +29,7 @@ const maxLengths = {
   gender: 32,
   class_name: 64,
   stream: 64,
+  student_type: 32,
   photo_url: 500,
   parent_name: 205,
   parent_phone: 32,
@@ -91,6 +93,7 @@ export function normalizeRow(row, mapping) {
     if (field === "fee_balance" && value && feeBalancePattern.test(value)) {
       value = normalizeFeeBalance(value);
     }
+    if (field === "student_type" && value) value = value.toUpperCase();
     normalized[field] = value;
   }
   return normalized;
@@ -108,6 +111,10 @@ export function validateRow(extracted, duplicateAccountNumbers = new Set()) {
   const feeBalance = clean(extracted?.fee_balance);
   if (feeBalance && !feeBalancePattern.test(feeBalance)) {
     errors.push("fee balance must be a non-negative amount with up to two decimal places");
+  }
+  const studentType = clean(extracted?.student_type).toUpperCase();
+  if (studentType && !["DAY", "BOARDING"].includes(studentType)) {
+    errors.push("student type must be DAY or BOARDING");
   }
 
   const key = clean(extracted?.student_account_no).toLowerCase();
@@ -152,6 +159,7 @@ export function shapeImportRow(row) {
     gender: row.existing_gender,
     class_name: row.existing_class_name,
     stream: row.existing_stream,
+    student_type: row.existing_student_type,
     photo_url: row.existing_photo_url,
     parent_name: row.existing_parent_name,
     parent_phone: row.existing_parent_phone,
@@ -424,7 +432,8 @@ export async function listImportRows(batchId, schoolId, { page = 1, pageSize = d
             s.id AS existing_student_id, s.student_account_no AS existing_student_account_no,
             s.first_name AS existing_first_name, s.last_name AS existing_last_name,
             s.gender AS existing_gender, s.class_name AS existing_class_name,
-            s.stream AS existing_stream, s.photo_url AS existing_photo_url,
+            s.stream AS existing_stream, s.student_type AS existing_student_type,
+            s.photo_url AS existing_photo_url,
             s.parent_name AS existing_parent_name, s.parent_phone AS existing_parent_phone,
             s.fee_balance AS existing_fee_balance
        FROM import_rows ir
@@ -531,8 +540,8 @@ function makeUid() {
 
 const insertStudentSql = `
   INSERT INTO students
-    (school_id, student_uid, student_account_no, first_name, last_name, full_name, gender, class_name, stream, photo_url, parent_name, parent_phone, school_name, fee_balance, card_extra, import_batch_id)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+    (school_id, student_uid, student_account_no, first_name, last_name, full_name, gender, class_name, stream, student_type, photo_url, parent_name, parent_phone, school_name, fee_balance, card_extra, import_batch_id)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
 const importRollbackFields = [
   "student_account_no",
@@ -542,6 +551,7 @@ const importRollbackFields = [
   "gender",
   "class_name",
   "stream",
+  "student_type",
   "photo_url",
   "parent_name",
   "parent_phone",
@@ -596,7 +606,7 @@ export async function commitImportBatch(batchId, schoolId, session = null) {
     for (let index = 0; index < accountNumbers.length; index += insertChunkSize) {
       const [found] = await scoped.query(
         `SELECT id, student_account_no, first_name, last_name, full_name, gender,
-                class_name, stream, photo_url, parent_name, parent_phone, school_name,
+                class_name, stream, student_type, photo_url, parent_name, parent_phone, school_name,
                 fee_balance, card_extra, import_batch_id, status, version
            FROM students
           WHERE school_id = ? AND student_account_no IN (?)
@@ -653,6 +663,7 @@ export async function commitImportBatch(batchId, schoolId, session = null) {
           acceptedData.gender || null,
           acceptedData.class_name || null,
           acceptedData.stream || null,
+          acceptedData.student_type || null,
           acceptedData.photo_url || null,
           acceptedData.parent_name || null,
           acceptedData.parent_phone || null,
