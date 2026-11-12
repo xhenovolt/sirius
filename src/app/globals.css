@@ -242,3 +242,69 @@ a.shell-link { text-decoration: none; }
   .shell { display: block; min-height: 0; }
   .shell-content .dashboard { padding: 0; max-width: none; }
 }
+
+.card-designer-controls { overflow: hidden; }
+.card-designer-controls > .panel-heading { align-items: center; }
+.card-designer-hint { max-width: 430px; margin: 0; color: var(--ink-muted); font-size: 11px; line-height: 1.5; }
+.card-designer-workspace { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 18px; padding: 0 25px 20px; }
+.card-designer-canvas-panel, .card-designer-properties { min-width: 0; border: 1px solid var(--line); border-radius: 8px; background: #f7faf8; }
+.card-designer-canvas-heading { display: flex; justify-content: space-between; gap: 14px; padding: 13px 15px; border-bottom: 1px solid var(--line); color: var(--foreground); font-size: 11px; }
+.card-designer-canvas-heading > div { display: grid; gap: 4px; }
+.card-designer-canvas-heading span { color: var(--ink-muted); font-size: 9px; font-weight: 400; }
+.card-designer-canvas-heading > span { flex: 0 0 auto; align-self: center; }
+.card-designer-stage { display: flex; align-items: center; justify-content: center; min-height: 330px; padding: 28px; overflow: auto; background-color: #edf2ef; background-image: linear-gradient(45deg, #dfe7e2 25%, transparent 25%), linear-gradient(-45deg, #dfe7e2 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #dfe7e2 75%), linear-gradient(-45deg, transparent 75%, #dfe7e2 75%); background-size: 16px 16px; background-position: 0 0, 0 8px, 8px -8px, -8px 0; }
+.qr-card.qr-card-editor { position: relative; flex: 0 0 auto; width: min(100%, 720px); height: auto; min-height: 0; aspect-ratio: var(--card-ratio); margin: auto; padding: 0; overflow: hidden; border: 1px solid #bdcbc3; border-top: 4px solid var(--card-accent); border-radius: 8px; box-sizing: border-box; box-shadow: 0 12px 30px rgba(27, 45, 37, .16); }
+.qr-card.qr-card-issued { position: relative; width: min(100%, var(--card-width)); height: auto; min-height: 0; aspect-ratio: var(--card-ratio); margin-inline: auto; padding: 0; overflow: hidden; border: 1px solid #d5ddd9; border-top: 3px solid var(--card-accent); border-radius: 2mm; box-sizing: border-box; }
+.card-element { position: absolute; display: block; overflow: hidden; box-sizing: border-box; line-height: 1.15; overflow-wrap: anywhere; }
+.card-element-title { font-weight: 750; line-height: 1.05; }
+.card-element-school_name { font-weight: 650; }
+.card-element-full_name { font-weight: 750; line-height: 1.05; }
+.card-element-photo_url, .card-element-qr_code { display: flex; align-items: center; justify-content: center; }
+.card-element-photo_url { border-radius: 3px; overflow: hidden; }
+.card-element-photo_url .card-element-initial { display: grid; place-items: center; width: 100%; height: 100%; background: #e5f0eb; color: #43846a; font-weight: 700; }
+.card-element-photo { display: block; width: 100%; height: 100%; object-fit: cover; }
+.card-element-qr_code { background: #fff; }
+.card-element-qr { display: block; width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; }
+.card-element-qr_code .qr-loading { display: grid; place-items: center; width: 100%; height: 100%; margin: 0; border: 1px dashed #9aa9a1; font-size: 8px; }
+.card-element-draggable { cursor: move; touch-action: none; user-select: none; }
+.card-element-draggable:hover { outline: 1px dashed rgba(41, 106, 82, .72); outline-offset: 1px; }
+.card-element-selected { z-index: 2; outline: 2px solid #277552; outline-offset: 1px; }
+.designer-resize-handle { position: absolute; right: 0; bottom: 0; z-index: 3; width: 14px; height: 14px; padding: 0; border: 2px solid #fff; border-radius: 50%; background: #277552; box-shadow: 0 1px 5px rgba(0, 0, 0, .35); cursor: nwse-resize; touch-action: none; }
+.card-designer-properties { display: flex; flex-direction: column; gap: 12px; padding: 13px; background: #fff; }
+.card-designer-properties-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 11px; }
+.card-designer-properties-title span { overflow: hidden; color: var(--blue); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.card-designer-layer-list { display: flex; flex-wrap: wrap; gap: 5px; padding-bottom: 11px; border-bottom: 1px solid var(--line); }
+.card-designer-layer-list button { padding: 5px 7px; border: 1px solid var(--line); border-radius: 4px; background: #fff; color: var(--ink-muted); font-size: 9px; cursor: pointer; }
+.card-designer-layer-list button.selected { border-color: #43846a; background: #eaf3ee; color: #276247; }
+.card-designer-properties label { display: grid; gap: 5px; color: var(--ink-muted); font-size: 9px; }
+.card-designer-properties input, .card-designer-properties select { width: 100%; min-width: 0; height: 33px; padding: 0 8px; border: 1px solid var(--line); border-radius: 4px; background: #fff; color: var(--foreground); font: inherit; font-size: 10px; }
+.card-designer-properties input[type="color"] { padding: 3px; }
+.card-designer-property-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.card-designer-properties .card-designer-property-input { font-variant-numeric: tabular-nums; }
+.card-template-actions { flex-wrap: wrap; }
+.card-field-options { padding-top: 12px; padding-bottom: 12px; }
+.qr-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); }
+
+@media (max-width: 900px) {
+  .card-designer-workspace { grid-template-columns: minmax(0, 1fr); }
+  .card-designer-properties { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+  .card-designer-properties-title, .card-designer-layer-list { grid-column: 1 / -1; }
+  .card-designer-property-grid { grid-column: 1 / -1; }
+}
+
+@media (max-width: 620px) {
+  .card-designer-workspace { padding: 0 15px 16px; }
+  .card-designer-hint { display: none; }
+  .card-designer-stage { min-height: 240px; padding: 14px; }
+  .card-designer-properties { grid-template-columns: minmax(0, 1fr); }
+  .card-designer-properties-title, .card-designer-layer-list, .card-designer-property-grid { grid-column: auto; }
+  .qr-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media print {
+  .card-designer-controls, .card-actions, .qr-card-footer { display: none !important; }
+  .qr-grid { grid-template-columns: repeat(2, var(--card-width)); justify-content: center; gap: 5mm; }
+  .qr-card.qr-card-issued { width: var(--card-width); height: var(--card-height); min-height: 0; max-width: none; margin: 0; aspect-ratio: auto; break-inside: avoid; box-shadow: none; }
+  .card-element-draggable:hover, .card-element-selected { outline: none; }
+  .designer-resize-handle { display: none !important; }
+}

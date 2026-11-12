@@ -9,6 +9,48 @@ test("card template accepts only safe, available fields and bounded layout value
   assert.ok(!template.fields.includes("fee_balance"));
 });
 
+test("legacy card templates receive a positioned layout and support dynamic titles", () => {
+  const { elements, titleField, ...legacyTemplate } = defaultCardTemplate;
+  const upgraded = validateCardTemplate(legacyTemplate);
+
+  assert.equal(upgraded.titleField, "custom");
+  assert.equal(upgraded.elements.length, defaultCardTemplate.fields.length + 1);
+  assert.deepEqual(upgraded.elements.map(({ field }) => field), ["title", ...defaultCardTemplate.fields]);
+  assert.deepEqual(
+    validateCardTemplate({ ...defaultCardTemplate, titleField: "full_name" }).titleField,
+    "full_name",
+  );
+});
+
+test("card element layouts enforce bounds, unique components, and safe styling", () => {
+  const title = defaultCardTemplate.elements[0];
+  assert.throws(
+    () => validateCardTemplate({
+      ...defaultCardTemplate,
+      elements: [{ ...title, x: 90, width: 20 }, ...defaultCardTemplate.elements.slice(1)],
+    }),
+    /position, size, and text size/,
+  );
+  assert.throws(
+    () => validateCardTemplate({
+      ...defaultCardTemplate,
+      elements: [...defaultCardTemplate.elements, title],
+    }),
+    /exactly one layout/,
+  );
+  assert.throws(
+    () => validateCardTemplate({
+      ...defaultCardTemplate,
+      elements: [{ ...title, color: "url(javascript:alert(1))" }, ...defaultCardTemplate.elements.slice(1)],
+    }),
+    /alignment or text color/,
+  );
+  assert.throws(
+    () => validateCardTemplate({ ...defaultCardTemplate, titleField: "fee_balance" }),
+    /supported student field/,
+  );
+});
+
 test("card template rejects fee balance and arbitrary template properties", () => {
   assert.throws(
     () => validateCardTemplate({ ...defaultCardTemplate, fields: [...defaultCardTemplate.fields, "fee_balance"] }),

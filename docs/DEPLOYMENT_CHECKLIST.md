@@ -77,6 +77,10 @@ must not be treated as production-ready evidence.
       precedence using Africa/Kampala dates.
 - [ ] Print at the configured card dimensions and use the browser's
       **Save as PDF** option. Confirm no clipped fields and no fee balance.
+- [ ] In `/cards/designer`, drag and resize the photo, title, and QR; set the
+      title to a student field; save a new version, reopen it, and confirm the
+      layout persists. Verify `/cards/designer/{templateId}` opens the selected
+      school template only.
 - [ ] Reprint previously issued cards that still encode the retired
       `/verify/{student_uid}` format.
 

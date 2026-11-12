@@ -1,22 +1,62 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
-import { cardFields, defaultCardTemplate } from "@/lib/cardTemplateSchema";
+import { cardElementDefaults, cardFields, defaultCardTemplate } from "@/lib/cardTemplateSchema";
+
+const TITLE_SOURCE_OPTIONS = [
+  ["custom", "Custom title"],
+  ["school_name", "School name"],
+  ["full_name", "Student name"],
+  ["student_account_no", "Student account number"],
+  ["class_name", "Class"],
+  ["stream", "Stream"],
+];
 
 function newestTemplate(templates) {
   return [...templates].sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt))[0] || null;
 }
 
-export default function QrCards({ students, school, templates: savedTemplates, canManage }) {
+function fieldLabel(key) {
+  if (key === "title") return "Title";
+  return cardFields.find((field) => field.key === key)?.label || key;
+}
+
+function getFieldValue(field, student, school) {
+  if (field === "school_name") return school?.school_name || "School name";
+  if (field === "full_name") return student.full_name || "Student name";
+  if (field === "student_account_no") return student.student_account_no || "Student number";
+  if (field === "class_name") return `Class: ${student.class_name || "Not set"}`;
+  if (field === "stream") return `Stream: ${student.stream || "Not set"}`;
+  return "";
+}
+
+function constrainElement(element) {
+  const width = Math.max(3, Math.min(100, Number(element.width) || 3));
+  const height = Math.max(3, Math.min(100, Number(element.height) || 3));
+  const x = Math.max(0, Math.min(100 - width, Number(element.x) || 0));
+  const y = Math.max(0, Math.min(100 - height, Number(element.y) || 0));
+  return {
+    ...element,
+    x: Math.round(x * 100) / 100,
+    y: Math.round(y * 100) / 100,
+    width: Math.round(width * 100) / 100,
+    height: Math.round(height * 100) / 100,
+    fontSize: Math.max(6, Math.min(48, Number(element.fontSize) || 6)),
+  };
+}
+
+export default function QrCards({ students, school, templates: savedTemplates, canManage, selectedTemplateId }) {
   const [codes, setCodes] = useState({});
   const [templates, setTemplates] = useState(savedTemplates);
-  const initialTemplate = newestTemplate(savedTemplates);
+  const initialTemplate = savedTemplates.find((item) => item.id === selectedTemplateId) || newestTemplate(savedTemplates);
   const [templateName, setTemplateName] = useState(initialTemplate?.name || "Standard identity card");
   const [selectedVersionId, setSelectedVersionId] = useState(initialTemplate?.id || "");
   const [template, setTemplate] = useState(initialTemplate?.template || defaultCardTemplate);
+  const [selectedField, setSelectedField] = useState("title");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const pointerActionRef = useRef(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -65,30 +105,93 @@ export default function QrCards({ students, school, templates: savedTemplates, c
     setSelectedVersionId("");
   }
 
+  function updateElement(field, updates) {
+    updateTemplate({
+      elements: template.elements.map((element) => (
+        element.field === field ? constrainElement({ ...element, ...updates }) : element
+      )),
+    });
+  }
+
   function selectVersion(id) {
     const saved = templates.find((item) => item.id === id);
     if (!saved) return;
     setSelectedVersionId(saved.id);
     setTemplateName(saved.name);
     setTemplate(saved.template);
+    setSelectedField("title");
     setMessage(`Loaded ${saved.name}, version ${saved.version}.`);
   }
 
   function toggleField(key, checked) {
     if ((key === "full_name" || key === "qr_code") && !checked) return;
-    const fields = checked
-      ? [...template.fields, key]
-      : template.fields.filter((field) => field !== key);
-    updateTemplate({ fields });
+    if (checked) {
+      updateTemplate({
+        fields: [...template.fields, key],
+        elements: [...template.elements, { field: key, ...cardElementDefaults[key] }],
+      });
+      setSelectedField(key);
+    } else {
+      updateTemplate({
+        fields: template.fields.filter((field) => field !== key),
+        elements: template.elements.filter((element) => element.field !== key),
+      });
+      if (selectedField === key) setSelectedField("title");
+    }
   }
 
-  function moveField(key, direction) {
-    const index = template.fields.indexOf(key);
-    const nextIndex = index + direction;
-    if (index < 0 || nextIndex < 0 || nextIndex >= template.fields.length) return;
-    const fields = [...template.fields];
-    [fields[index], fields[nextIndex]] = [fields[nextIndex], fields[index]];
-    updateTemplate({ fields });
+  function startPointerAction(field, event, mode) {
+    if (busy) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const element = template.elements.find((item) => item.field === field);
+    const bounds = event.currentTarget.closest(".qr-card-editor")?.getBoundingClientRect();
+    if (!element || !bounds?.width || !bounds?.height) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    pointerActionRef.current = {
+      pointerId: event.pointerId,
+      field,
+      mode,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      stageWidth: bounds.width,
+      stageHeight: bounds.height,
+      element,
+    };
+    setSelectedField(field);
+  }
+
+  function movePointerAction(event) {
+    const action = pointerActionRef.current;
+    if (!action || action.pointerId !== event.pointerId) return;
+    const dx = ((event.clientX - action.startClientX) / action.stageWidth) * 100;
+    const dy = ((event.clientY - action.startClientY) / action.stageHeight) * 100;
+    const { element } = action;
+    if (action.mode === "move") {
+      updateElement(action.field, { x: element.x + dx, y: element.y + dy });
+    } else {
+      updateElement(action.field, { width: element.width + dx, height: element.height + dy });
+    }
+  }
+
+  function finishPointerAction(event) {
+    if (pointerActionRef.current?.pointerId === event.pointerId) pointerActionRef.current = null;
+  }
+
+  function handleElementKeyDown(field, event) {
+    const step = event.shiftKey ? 5 : 1;
+    if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) return;
+    event.preventDefault();
+    setSelectedField(field);
+    const element = template.elements.find((item) => item.field === field);
+    if (!element) return;
+    const changes = {
+      ArrowUp: { y: element.y - step },
+      ArrowDown: { y: element.y + step },
+      ArrowLeft: { x: element.x - step },
+      ArrowRight: { x: element.x + step },
+    }[event.key];
+    updateElement(field, changes);
   }
 
   async function saveTemplate() {
@@ -125,39 +228,116 @@ export default function QrCards({ students, school, templates: savedTemplates, c
   }
 
   function download(student) {
+    if (!codes[student.student_uid]) return;
     const link = document.createElement("a");
     link.download = `${student.student_uid}.png`;
     link.href = codes[student.student_uid];
     link.click();
   }
 
-  function fieldLabel(key) {
-    return cardFields.find((field) => field.key === key)?.label || key;
-  }
-
-  function renderField(student, field) {
-    if (field === "school_name") return <p className="card-school-name" key={field}>{school?.school_name || "School"}</p>;
-    if (field === "full_name") return <h2 className="card-student-name" key={field}>{student.full_name}</h2>;
-    if (field === "student_account_no") return <p className="card-student-number" key={field}>{student.student_account_no}</p>;
-    if (field === "class_name") return <p className="card-detail" key={field}>Class: {student.class_name || "Not set"}</p>;
-    if (field === "stream") return <p className="card-detail" key={field}>Stream: {student.stream || "Not set"}</p>;
+  function renderElementValue(student, field) {
+    if (field === "title") {
+      return template.titleField === "custom"
+        ? template.title
+        : getFieldValue(template.titleField, student, school);
+    }
+    if (field === "school_name" || field === "full_name" || field === "student_account_no"
+      || field === "class_name" || field === "stream") {
+      return getFieldValue(field, student, school);
+    }
     if (field === "photo_url") {
       return student.photo_url
-        ? <img className="card-photo" src={student.photo_url} alt={`Portrait of ${student.full_name}`} key={field} />
-        : <span className="card-photo card-initial" key={field}>{student.full_name.slice(0, 1)}</span>;
+        ? <img className="card-element-photo" src={student.photo_url} alt={`Portrait of ${student.full_name || "student"}`} />
+        : <span className="card-element-initial">{(student.full_name || "?").slice(0, 1)}</span>;
     }
     if (field === "qr_code") {
       return codes[student.student_uid]
-        ? <img className="qr-image" src={codes[student.student_uid]} alt={`Verification QR code for ${student.full_name}`} key={field} />
-        : <div className="qr-loading" key={field}>Preparing QR</div>;
+        ? <img className="card-element-qr" src={codes[student.student_uid]} alt={`Verification QR code for ${student.full_name || "student"}`} />
+        : <span className="qr-loading">QR code</span>;
     }
     return null;
   }
 
+  function renderCard(student, designer = false) {
+    return (
+      <article
+        className={`qr-card ${designer ? "qr-card-editor" : "qr-card-issued"}`}
+        key={student.student_uid}
+        style={{
+          "--card-accent": template.accentColor,
+          "--card-background": template.backgroundColor,
+          "--card-width": `${template.widthMm}mm`,
+          "--card-height": `${template.heightMm}mm`,
+          "--card-ratio": `${template.widthMm} / ${template.heightMm}`,
+        }}
+      >
+        {template.elements.map((element) => {
+          const color = element.color === "accent"
+            ? template.accentColor
+            : element.color === "text"
+              ? "#172522"
+              : element.color === "muted"
+                ? "#63736c"
+                : element.color;
+          return (
+            <div
+              key={element.field}
+              className={`card-element card-element-${element.field}${designer && selectedField === element.field ? " card-element-selected" : ""}${designer ? " card-element-draggable" : ""}`}
+              style={{
+                left: `${element.x}%`,
+                top: `${element.y}%`,
+                width: `${element.width}%`,
+                height: `${element.height}%`,
+                fontSize: `${element.fontSize}px`,
+                textAlign: element.align,
+                color,
+              }}
+              aria-label={designer ? `${fieldLabel(element.field)}. Drag to move; use arrow keys for precise placement.` : undefined}
+              role={designer ? "group" : undefined}
+              tabIndex={designer ? 0 : undefined}
+              onClick={designer ? () => setSelectedField(element.field) : undefined}
+              onPointerDown={designer ? (event) => {
+                if (!event.target.closest(".designer-resize-handle")) startPointerAction(element.field, event, "move");
+              } : undefined}
+              onPointerMove={designer ? movePointerAction : undefined}
+              onPointerUp={designer ? finishPointerAction : undefined}
+              onPointerCancel={designer ? finishPointerAction : undefined}
+              onKeyDown={designer ? (event) => handleElementKeyDown(element.field, event) : undefined}
+            >
+              {renderElementValue(student, element.field)}
+              {designer && selectedField === element.field && (
+                <button
+                  type="button"
+                  className="designer-resize-handle"
+                  aria-label={`Resize ${fieldLabel(element.field)}`}
+                  onPointerDown={(event) => startPointerAction(element.field, event, "resize")}
+                  onClick={(event) => event.stopPropagation()}
+                />
+              )}
+            </div>
+          );
+        })}
+      </article>
+    );
+  }
+
+  const selectedElement = template.elements.find((element) => element.field === selectedField) || template.elements[0];
+  const previewStudent = students[0] || {
+    student_uid: "designer-preview",
+    full_name: "Alexandra Sample",
+    student_account_no: "STU-001",
+    class_name: "Primary 4",
+    stream: "Blue",
+  };
+  const inputClass = "card-designer-property-input";
+
   return (
     <>
       <section className="panel card-designer-controls">
-        <div className="panel-heading"><div><p className="eyebrow">Card designer</p><h2>Customize the layout</h2></div></div>
+        <div className="panel-heading">
+          <div><p className="eyebrow">Card designer</p><h2>Design the whole card</h2></div>
+          <p className="card-designer-hint">Drag components on the card. Select a component to set its exact position, size, and text style.</p>
+        </div>
         <div className="card-designer-form">
           {templates.length > 0 && (
             <label>Load a saved version
@@ -168,18 +348,89 @@ export default function QrCards({ students, school, templates: savedTemplates, c
             </label>
           )}
           <label>Template name<input value={templateName} maxLength={100} onChange={(event) => changeTemplateName(event.target.value)} disabled={busy || !canManage} /></label>
-          <label>Card title<input value={template.title} maxLength={100} onChange={(event) => updateTemplate({ title: event.target.value })} disabled={busy} /></label>
-          <label>Width (mm)<input type="number" min="50" max="150" step="1" value={template.widthMm} onChange={(event) => updateTemplate({ widthMm: Number(event.target.value) })} disabled={busy} /></label>
-          <label>Height (mm)<input type="number" min="30" max="100" step="1" value={template.heightMm} onChange={(event) => updateTemplate({ heightMm: Number(event.target.value) })} disabled={busy} /></label>
+          <label>Card width (mm)<input type="number" min="50" max="150" step="1" value={template.widthMm} onChange={(event) => updateTemplate({ widthMm: Number(event.target.value) })} disabled={busy} /></label>
+          <label>Card height (mm)<input type="number" min="30" max="100" step="1" value={template.heightMm} onChange={(event) => updateTemplate({ heightMm: Number(event.target.value) })} disabled={busy} /></label>
           <label>Accent color<input type="color" value={template.accentColor} onChange={(event) => updateTemplate({ accentColor: event.target.value })} disabled={busy} /></label>
-          <label>Background color<input type="color" value={template.backgroundColor} onChange={(event) => updateTemplate({ backgroundColor: event.target.value })} disabled={busy} /></label>
+          <label>Card background<input type="color" value={template.backgroundColor} onChange={(event) => updateTemplate({ backgroundColor: event.target.value })} disabled={busy} /></label>
         </div>
         <div className="card-field-options">
-          <strong>Available fields</strong>
+          <strong>Card components</strong>
+          <label><input type="checkbox" checked disabled />Title</label>
           {cardFields.map(({ key, label }) => (
             <label key={key}><input type="checkbox" checked={template.fields.includes(key)} disabled={busy || key === "full_name" || key === "qr_code"} onChange={(event) => toggleField(key, event.target.checked)} />{label}</label>
           ))}
-          <p>Fee balance is intentionally unavailable on identity cards.</p>
+          <p>Student name and verification QR stay on every card. Fee balance is intentionally unavailable.</p>
+        </div>
+        <div className="card-designer-workspace">
+          <div className="card-designer-canvas-panel">
+            <div className="card-designer-canvas-heading">
+              <div><strong>Live card canvas</strong><span>Drag to move · drag the corner to resize · arrow keys for fine placement</span></div>
+              <span>{template.widthMm} × {template.heightMm} mm</span>
+            </div>
+            <div className="card-designer-stage">
+              {renderCard(previewStudent, true)}
+            </div>
+          </div>
+          <aside className="card-designer-properties" aria-label="Selected component settings">
+            <div className="card-designer-properties-title"><strong>Component properties</strong><span>{fieldLabel(selectedElement.field)}</span></div>
+            <div className="card-designer-layer-list" aria-label="Card component layers">
+              {template.elements.map((element) => (
+                <button
+                  type="button"
+                  key={element.field}
+                  className={selectedField === element.field ? "selected" : ""}
+                  onClick={() => setSelectedField(element.field)}
+                >{fieldLabel(element.field)}</button>
+              ))}
+            </div>
+            {selectedElement.field === "title" && (
+              <>
+                <label>Title shows
+                  <select value={template.titleField} onChange={(event) => updateTemplate({ titleField: event.target.value })} disabled={busy}>
+                    {TITLE_SOURCE_OPTIONS.map(([value, label]) => <option value={value} key={value}>{label}</option>)}
+                  </select>
+                </label>
+                {template.titleField === "custom" && (
+                  <label>Title text
+                    <input value={template.title} maxLength={100} onChange={(event) => updateTemplate({ title: event.target.value })} disabled={busy} />
+                  </label>
+                )}
+              </>
+            )}
+            <div className="card-designer-property-grid">
+              <label>Left (%)
+                <input className={inputClass} type="number" min="0" max={100 - selectedElement.width} step="0.5" value={selectedElement.x} onChange={(event) => updateElement(selectedElement.field, { x: Number(event.target.value) })} disabled={busy} />
+              </label>
+              <label>Top (%)
+                <input className={inputClass} type="number" min="0" max={100 - selectedElement.height} step="0.5" value={selectedElement.y} onChange={(event) => updateElement(selectedElement.field, { y: Number(event.target.value) })} disabled={busy} />
+              </label>
+              <label>Width (%)
+                <input className={inputClass} type="number" min="3" max={100 - selectedElement.x} step="0.5" value={selectedElement.width} onChange={(event) => updateElement(selectedElement.field, { width: Number(event.target.value) })} disabled={busy} />
+              </label>
+              <label>Height (%)
+                <input className={inputClass} type="number" min="3" max={100 - selectedElement.y} step="0.5" value={selectedElement.height} onChange={(event) => updateElement(selectedElement.field, { height: Number(event.target.value) })} disabled={busy} />
+              </label>
+              <label>Text size (px)
+                <input className={inputClass} type="number" min="6" max="48" step="1" value={selectedElement.fontSize} onChange={(event) => updateElement(selectedElement.field, { fontSize: Number(event.target.value) })} disabled={busy || selectedElement.field === "photo_url" || selectedElement.field === "qr_code"} />
+              </label>
+              <label>Alignment
+                <select value={selectedElement.align} onChange={(event) => updateElement(selectedElement.field, { align: event.target.value })} disabled={busy || selectedElement.field === "photo_url" || selectedElement.field === "qr_code"}>
+                  <option value="left">Left</option><option value="center">Center</option><option value="right">Right</option>
+                </select>
+              </label>
+            </div>
+            <label>Text color
+              <select value={["accent", "text", "muted"].includes(selectedElement.color) ? selectedElement.color : "custom"} onChange={(event) => {
+                if (event.target.value !== "custom") updateElement(selectedElement.field, { color: event.target.value });
+              }} disabled={busy || selectedElement.field === "photo_url" || selectedElement.field === "qr_code"}>
+                <option value="accent">Card accent</option><option value="text">Dark text</option><option value="muted">Muted text</option>
+                {!["accent", "text", "muted"].includes(selectedElement.color) && <option value="custom">Custom color</option>}
+              </select>
+            </label>
+            <label>Custom text color
+              <input type="color" value={/^#[0-9a-f]{6}$/i.test(selectedElement.color) ? selectedElement.color : template.accentColor} onChange={(event) => updateElement(selectedElement.field, { color: event.target.value })} disabled={busy || selectedElement.field === "photo_url" || selectedElement.field === "qr_code"} />
+            </label>
+          </aside>
         </div>
         <div className="card-template-actions">
           {canManage
@@ -187,37 +438,16 @@ export default function QrCards({ students, school, templates: savedTemplates, c
             : <span>Only school admins can save templates.</span>}
           {message && <p className="settings-message" role="status">{message}</p>}
         </div>
-        {template.fields.length > 0 && (
-          <div className="card-field-order">
-            <strong>Field order</strong>
-            {template.fields.map((field, index) => (
-              <span key={field}>{fieldLabel(field)}
-                <button type="button" aria-label={`Move ${fieldLabel(field)} up`} onClick={() => moveField(field, -1)} disabled={busy || index === 0}>↑</button>
-                <button type="button" aria-label={`Move ${fieldLabel(field)} down`} onClick={() => moveField(field, 1)} disabled={busy || index === template.fields.length - 1}>↓</button>
-              </span>
-            ))}
-          </div>
-        )}
       </section>
-      <div className="card-actions"><span>{students.length} cards ready</span><button className="button button-primary" type="button" onClick={() => window.print()}>Print / Save PDF <span>↗</span></button></div>
-      <div className="qr-grid">
-        {students.map((student) => (
-          <article
-            className="qr-card"
-            key={student.student_uid}
-            style={{
-              "--card-accent": template.accentColor,
-              "--card-background": template.backgroundColor,
-              "--card-width": `${template.widthMm}mm`,
-              "--card-height": `${template.heightMm}mm`,
-            }}
-          >
-            <p className="card-template-title">{template.title}</p>
-            <div className={`qr-card-content${template.fields.includes("photo_url") ? " card-with-photo" : ""}`}>{template.fields.map((field) => renderField(student, field))}</div>
-            <div className="qr-card-footer"><button type="button" onClick={() => download(student)} disabled={!codes[student.student_uid]}>Download QR</button></div>
-          </article>
-        ))}
-      </div>
+      {students.length > 0 && (
+        <>
+          <div className="card-actions"><span>{students.length} cards ready</span><button className="button button-primary" type="button" onClick={() => window.print()}>Print / Save PDF <span>↗</span></button></div>
+          <div
+            className="qr-grid"
+            style={{ "--card-width": `${template.widthMm}mm`, "--card-height": `${template.heightMm}mm` }}
+          >{students.map((student) => renderCard(student))}</div>
+        </>
+      )}
     </>
   );
 }

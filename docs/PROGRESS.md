@@ -1113,7 +1113,8 @@ edit anything, which is why the sidebar is deliberately broad.
   mint accents, print hides shell chrome).
 
 ### Scaffolds (honest stubs, land in later phases)
-- `/cards/designer` lists real templates; the WYSIWYG editor is Phase 3.
+- At this phase, `/cards/designer` and its template detail route were read-only
+  scaffolds; the 2026-11-12 update below replaces them with the live editor.
 - `/cards/preview` (Phase 2 renderer), `/cards/batches/[id]` (Phase 5 print
   batches) are informational scaffolds with links to working pages.
 
@@ -1131,3 +1132,31 @@ edit anything, which is why the sidebar is deliberately broad.
 ### Next
 Phase 2: shared renderer + zod schema + Jipra Classic preset + live preview
 + published-version issuance and the card data-model tables.
+
+## 2026-11-12 — Drag-and-position card designer
+
+- Replaced the field-order-only card editor with a live card canvas. Every
+  enabled component (title, school/student text, photo, and QR) can be selected,
+  dragged to a new position, and resized from its corner handle. Arrow keys
+  move the selected component; property controls set exact percentage-based
+  position/size, text size, alignment, and color.
+- The title can now be custom text or dynamically display the school name,
+  student name, student account number, class, or stream. Photo placement and
+  size are independent of text and QR layout. Components can be enabled or
+  removed, except student name and verification QR which remain required.
+- Layout geometry and style are stored in the existing immutable per-school
+  template versions. The server validates allowed component types, bounds,
+  colors, text styles, and required components. Existing templates without
+  geometry are upgraded to the default positioned layout when read; no
+  migration is needed. Fee balance remains excluded.
+- The same per-element layout renders in the editor and issued card grid;
+  print/PDF hides the editor and retains the physical card dimensions.
+- `/cards/designer` and `/cards/designer/[templateId]` now open the same editor
+  with sample data, so a school can design without issuing QR identities.
+- Validation: schema/persistence targeted tests and the complete test suite
+  pass (80 tests); production build passes. Browser interaction with an
+  authenticated school account and a physical print/PDF smoke test remain
+  production acceptance checks. In a local browser, dragging the photo changed
+  its stored percentage coordinates, resizing changed its width/height
+  properties, and selecting Student name changed the title preview to the
+  sample student's name.
