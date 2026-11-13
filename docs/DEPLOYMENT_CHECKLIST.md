@@ -72,11 +72,13 @@ must not be treated as production-ready evidence.
       verdict, and data-as-of time.
 - [ ] Confirm invalid, unknown, and revoked tokens have identical public
       responses; verify `noindex`, `no-referrer`, and scan rate limiting.
-- [ ] Check fee balances never appear on printed cards or in public verification
-      responses. Test allowance, class/term threshold, expiry, and zero-balance
-      precedence using Africa/Kampala dates.
+- [ ] Confirm public verification never exposes fee balances. New card
+      templates include the optional balance component by default; confirm a
+      school can remove it and print either choice. Test allowance, class/term
+      threshold, expiry, and zero-balance precedence using Africa/Kampala dates.
 - [ ] Print at the configured card dimensions and use the browser's
-      **Save as PDF** option. Confirm no clipped fields and no fee balance.
+      **Save as PDF** option. Confirm no clipped fields and that the printed
+      balance matches the saved template's component selection.
 - [ ] In `/cards/designer`, drag and resize the photo, title, and QR; set the
       title to a student field; save a new version, reopen it, and confirm the
       layout persists. Verify `/cards/designer/{templateId}` opens the selected
@@ -85,7 +87,13 @@ must not be treated as production-ready evidence.
       Jipra temporary or permanent clearance design, save it as a school
       template, and print the matching report. Temporary reports include
       currently allowed students; permanent reports include students whose
-      computed verdict is CLEARED. No fee balance is available on either card.
+      computed verdict is CLEARED. The balance component is selectable on both.
+- [ ] Open `/cards/preview`, render a saved template against an active student,
+      resolve any clipping/overlap warnings, and print or save as PDF. The
+      preview QR is deliberately nonfunctional; only issued cards contain live
+      verification URLs. Before retrying a failed `/cards` page, confirm the
+      deployed database has applied migration 016 and Platform Settings has a
+      valid public HTTPS website origin.
 - [ ] Reprint previously issued cards that still encode the retired
       `/verify/{student_uid}` format.
 

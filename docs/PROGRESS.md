@@ -1074,7 +1074,8 @@ The user resolved the open questions as runtime choices, not code defaults:
 2. Fonts — the user chooses.
 3. Who edits/publishes — SuperAdmin decides.
 4. Printer/stock — the user decides.
-5. Printed fees balance — the user decides (default remains hidden).
+5. Printed fees balance — new templates include the optional field by default;
+   the user can remove it. Only the public verification page always hides it.
 6. `stdtype` = DAY / BOARDING.
 7. Add a structured term and a second phone; display is user-decided.
 8. Asset storage — keep Cloudinary.
@@ -1180,3 +1181,48 @@ Phase 2: shared renderer + zod schema + Jipra Classic preset + live preview
   Authenticated end-to-end template saving and physical print/PDF checks remain
   deployment acceptance checks; no production DB migration or deployment was
   run in this task.
+
+## 2026-11-13 — Card formatting, optional balance, and reference preview
+
+- Made fee balance a selectable card component and included it by default in
+  new templates, including both Jipra presets. The designer can explicitly
+  remove the component before saving. Existing pre-v2 templates are upgraded
+  to include it; templates saved as v2 preserve an explicit removal. The public
+  verification view remains unchanged and never receives the balance.
+- Added per-component bold, italic, underline, strikethrough, custom text
+  color, and optional rotation controls. New clearance stamps default to
+  unrotated and can be configured with a department name, color, and date;
+  the school's logo is rendered in the stamp's selected color.
+- Added a Jipra reference-data preview using the names, school/term/phone,
+  student numbers, class/stream/type, sample balances, deadlines, and stamp
+  dates visible in the supplied images. The original student portraits are
+  not copied into the preview.
+- Validation: pending final test/build run. Interactive browser validation
+  requires an authenticated school session, which is not available in the
+  current browser context.
+
+## 2026-11-13 — Repairing card issuance and implementing live preview
+
+- Root cause for the configured TiDB issuance failure: card preparation selects
+  `students.student_type`, but that database had not yet applied migration
+  016. The page caught the SQL error and displayed the same generic message as
+  a missing database connection or public URL. Applied/verified migrations
+  001–016 with the migration runner; `student_type` now exists and
+  `016_student_type.sql` is recorded. The configured TiDB connection succeeds,
+  contains 13 student rows, and has a valid HTTPS Platform Settings origin.
+- Vercel's database target could not be independently compared with the
+  workspace's `.env.local` target, so production issuance is not claimed as
+  smoke-tested. Confirm that Vercel uses this same database; otherwise run
+  `npm.cmd run migrate` against the deployment database before retrying.
+- `/cards` now gives a safe, actionable hint for a missing public URL, the
+  specific missing `student_type` migration, QR identity issuance, or other
+  database/migration failures while retaining structured server-side error
+  details. Raw errors are not sent to the browser.
+- Replaced the `/cards/preview` placeholder with saved-template and
+  school-scoped active-student selectors using the same renderer as the
+  designer and issued cards. It has a nonfunctional preview-only QR, print /
+  Save as PDF, and clipping/overlap warnings; it does not mint identities.
+- Validation: all 85 automated tests pass, `npm.cmd run build` passes, and
+  `git diff --check` passes. The configured TiDB migration/column and HTTPS
+  origin checks pass. An authenticated browser/print smoke test and Vercel
+  database confirmation remain deployment acceptance checks.

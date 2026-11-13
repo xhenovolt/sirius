@@ -8,6 +8,7 @@ export const cardFields = [
   { key: "class_name", label: "Class" },
   { key: "stream", label: "Stream" },
   { key: "student_type", label: "Student type (DAY/BOARDING)" },
+  { key: "fee_balance", label: "Fees balance" },
   { key: "photo_url", label: "Student photo" },
   { key: "qr_code", label: "Verification QR code" },
   { key: "clearance_deadline", label: "Clearance deadline" },
@@ -28,6 +29,7 @@ export const cardElementDefaults = {
   class_name: { x: 21, y: 37, width: 10, height: 7, fontSize: 11, align: "center", color: "text" },
   stream: { x: 32, y: 37, width: 9, height: 7, fontSize: 11, align: "center", color: "text" },
   student_type: { x: 4, y: 48, width: 24, height: 7, fontSize: 11, align: "left", color: "text" },
+  fee_balance: { x: 30, y: 48, width: 24, height: 7, fontSize: 11, align: "left", color: "text" },
   photo_url: { x: 4, y: 4, width: 18, height: 29, fontSize: 14, align: "center", color: "#43846a" },
   qr_code: { x: 88, y: 36, width: 9, height: 16, fontSize: 8, align: "center", color: "muted" },
   clearance_deadline: { x: 30, y: 48, width: 44, height: 7, fontSize: 10, align: "center", color: "text" },
@@ -37,13 +39,23 @@ export const cardElementDefaults = {
   clearance_stamp: { x: 58, y: 48, width: 26, height: 16, fontSize: 18, align: "center", color: "#344c9b" },
 };
 
+for (const [field, element] of Object.entries(cardElementDefaults)) {
+  element.bold = ["title", "school_name", "full_name"].includes(field);
+  element.italic = false;
+  element.underline = false;
+  element.strikethrough = false;
+  element.rotation = 0;
+}
+
 const allowedFields = new Set(cardFields.map(({ key }) => key));
 const allowedElementFields = new Set(["title", ...allowedFields]);
 const titleSources = new Set(["custom", "school_name", "full_name", "student_account_no", "class_name", "stream", "student_type"]);
 const alignments = new Set(["left", "center", "right"]);
 const colors = new Set(["accent", "text", "muted"]);
 const cardTypes = new Set(["general", "temporary", "permanent"]);
+const cardTemplateSchemaVersion = 2;
 const allowedTemplateKeys = new Set([
+  "schemaVersion",
   "title",
   "titleField",
   "cardType",
@@ -51,6 +63,7 @@ const allowedTemplateKeys = new Set([
   "heightMm",
   "accentColor",
   "backgroundColor",
+  "stampDepartment",
   "fields",
   "elements",
 ]);
@@ -60,11 +73,13 @@ const defaultFields = [
   "student_account_no",
   "class_name",
   "stream",
+  "fee_balance",
   "photo_url",
   "qr_code",
 ];
 
 export const defaultCardTemplate = {
+  schemaVersion: cardTemplateSchemaVersion,
   title: "Student identity",
   titleField: "custom",
   cardType: "general",
@@ -72,6 +87,7 @@ export const defaultCardTemplate = {
   heightMm: 55,
   accentColor: "#2f6d58",
   backgroundColor: "#ffffff",
+  stampDepartment: "ACCOUNTS DEPT.",
   fields: defaultFields,
   elements: ["title", ...defaultFields].map((field) => ({ field, ...cardElementDefaults[field] })),
 };
@@ -86,7 +102,10 @@ export class CardTemplateError extends Error {
 
 function validateElement(element) {
   if (!element || typeof element !== "object" || Array.isArray(element)
-    || Object.keys(element).some((key) => !["field", "x", "y", "width", "height", "fontSize", "align", "color"].includes(key))
+    || Object.keys(element).some((key) => ![
+      "field", "x", "y", "width", "height", "fontSize", "align", "color",
+      "bold", "italic", "underline", "strikethrough", "rotation",
+    ].includes(key))
     || !allowedElementFields.has(element.field)) {
     throw new CardTemplateError("The card template contains an unsupported component.");
   }
@@ -98,9 +117,18 @@ function validateElement(element) {
     || fontSize < 6 || fontSize > 48) {
     throw new CardTemplateError("Component position, size, and text size must stay within the card.");
   }
+  const rotation = element.rotation ?? 0;
+  if (!Number.isFinite(rotation) || rotation < -45 || rotation > 45) {
+    throw new CardTemplateError("Component rotation must be between -45 and 45 degrees.");
+  }
   if (!alignments.has(element.align) || typeof element.color !== "string"
     || !(colors.has(element.color) || /^#[0-9a-f]{6}$/i.test(element.color))) {
     throw new CardTemplateError("Component alignment or text color is invalid.");
+  }
+  if (["bold", "italic", "underline", "strikethrough"].some(
+    (key) => element[key] !== undefined && typeof element[key] !== "boolean",
+  )) {
+    throw new CardTemplateError("Text formatting options must be enabled or disabled.");
   }
   return {
     field: element.field,
@@ -109,8 +137,13 @@ function validateElement(element) {
     width: Math.round(width * 100) / 100,
     height: Math.round(height * 100) / 100,
     fontSize: Math.round(fontSize * 100) / 100,
+    rotation: Math.round(rotation * 100) / 100,
     align: element.align,
     color: colors.has(element.color) ? element.color : element.color.toLowerCase(),
+    bold: element.bold ?? cardElementDefaults[element.field].bold,
+    italic: element.italic ?? cardElementDefaults[element.field].italic,
+    underline: element.underline ?? cardElementDefaults[element.field].underline,
+    strikethrough: element.strikethrough ?? cardElementDefaults[element.field].strikethrough,
   };
 }
 
@@ -120,6 +153,10 @@ export function validateCardTemplate(value) {
   }
   if (Object.keys(value).some((key) => !allowedTemplateKeys.has(key))) {
     throw new CardTemplateError("The card template contains an unsupported setting.");
+  }
+  const schemaVersion = value.schemaVersion ?? 1;
+  if (!Number.isInteger(schemaVersion) || schemaVersion < 1 || schemaVersion > cardTemplateSchemaVersion) {
+    throw new CardTemplateError("The card template version is not supported.");
   }
   if (typeof value.title !== "string" || !value.title.trim() || value.title.trim().length > 100) {
     throw new CardTemplateError("Card title must be between 1 and 100 characters.");
@@ -136,6 +173,10 @@ export function validateCardTemplate(value) {
     || typeof value.backgroundColor !== "string" || !/^#[0-9a-f]{6}$/i.test(value.backgroundColor)) {
     throw new CardTemplateError("Card colors must be six-digit hexadecimal values.");
   }
+  const stampDepartment = value.stampDepartment ?? "ACCOUNTS DEPT.";
+  if (typeof stampDepartment !== "string" || stampDepartment.trim().length > 80) {
+    throw new CardTemplateError("Stamp department must be 80 characters or fewer.");
+  }
   if (!Array.isArray(value.fields) || value.fields.some((field) => typeof field !== "string" || !allowedFields.has(field))) {
     throw new CardTemplateError("The card template contains an unsupported field.");
   }
@@ -150,10 +191,18 @@ export function validateCardTemplate(value) {
     throw new CardTemplateError("Choose a supported student field for the card title.");
   }
 
-  const expectedFields = new Set(["title", ...value.fields]);
-  const elementValues = value.elements === undefined
-    ? [...expectedFields].map((field) => ({ field, ...cardElementDefaults[field] }))
-    : value.elements;
+  const fields = [...value.fields];
+  if (schemaVersion < cardTemplateSchemaVersion && !fields.includes("fee_balance")) {
+    fields.push("fee_balance");
+  }
+  const expectedFields = new Set(["title", ...fields]);
+  let elementValues = value.elements;
+  if (elementValues === undefined) {
+    elementValues = [...expectedFields].map((field) => ({ field, ...cardElementDefaults[field] }));
+  } else if (schemaVersion < cardTemplateSchemaVersion && Array.isArray(elementValues)
+    && !elementValues.some((element) => element?.field === "fee_balance")) {
+    elementValues = [...elementValues, { field: "fee_balance", ...cardElementDefaults.fee_balance }];
+  }
   if (!Array.isArray(elementValues) || elementValues.length !== expectedFields.size) {
     throw new CardTemplateError("Every visible card component must have exactly one layout.");
   }
@@ -165,6 +214,7 @@ export function validateCardTemplate(value) {
   }
 
   return {
+    schemaVersion: cardTemplateSchemaVersion,
     title: value.title.trim(),
     titleField,
     cardType,
@@ -172,7 +222,8 @@ export function validateCardTemplate(value) {
     heightMm: value.heightMm,
     accentColor: value.accentColor.toLowerCase(),
     backgroundColor: value.backgroundColor.toLowerCase(),
-    fields: [...value.fields],
+    stampDepartment: stampDepartment.trim(),
+    fields,
     elements,
   };
 }
@@ -187,6 +238,7 @@ function createClearancePreset(cardType, title, extraField) {
     "class_name",
     "stream",
     "student_type",
+    "fee_balance",
     "full_name",
     "photo_url",
     "qr_code",
@@ -196,6 +248,7 @@ function createClearancePreset(cardType, title, extraField) {
     extraField,
   ];
   return validateCardTemplate({
+    schemaVersion: cardTemplateSchemaVersion,
     title,
     titleField: "custom",
     cardType,
@@ -203,8 +256,35 @@ function createClearancePreset(cardType, title, extraField) {
     heightMm: 55,
     accentColor: "#2f6d58",
     backgroundColor: "#f7c1d3",
+    stampDepartment: "ACCOUNTS DEPT.",
     fields,
-    elements: ["title", ...fields].map((field) => ({ field, ...cardElementDefaults[field] })),
+    elements: ["title", ...fields].map((field) => {
+      const clearanceLayout = {
+        title: { x: 26, y: 26, width: 61, height: 6, fontSize: 13 },
+        school_logo: { x: 82, y: 5, width: 13, height: 19, fontSize: 10 },
+        school_name: { x: 20, y: 2, width: 61, height: 9, fontSize: 14 },
+        school_term: { x: 20, y: 12, width: 61, height: 5, fontSize: 9 },
+        school_phone: { x: 20, y: 18, width: 61, height: 5, fontSize: 8 },
+        photo_url: { x: 4, y: 7, width: 14, height: 28, fontSize: 14 },
+        student_account_no: { x: 3, y: 37, width: 17, height: 6, fontSize: 9 },
+        class_name: { x: 21, y: 37, width: 8, height: 6, fontSize: 9 },
+        stream: { x: 30, y: 37, width: 10, height: 6, fontSize: 9 },
+        full_name: { x: 40, y: 32, width: 24, height: 7, fontSize: 11 },
+        student_type: { x: 4, y: 48, width: 17, height: 6, fontSize: 9 },
+        fee_balance: { x: 22, y: 48, width: 27, height: 6, fontSize: 9 },
+        clearance_deadline: { x: 50, y: 48, width: 30, height: 6, fontSize: 9 },
+        issued_on: { x: 78, y: 64, width: 18, height: 5, fontSize: 8 },
+        signature_line: { x: 4, y: 70, width: 38, height: 6, fontSize: 8 },
+        accounts_department: { x: 43, y: 70, width: 25, height: 6, fontSize: 8 },
+        clearance_stamp: { x: 64, y: 37, width: 31, height: 27, fontSize: 12 },
+        qr_code: { x: 88, y: 72, width: 9, height: 17, fontSize: 8 },
+      };
+      return {
+        field,
+        ...cardElementDefaults[field],
+        ...clearanceLayout[field],
+      };
+    }),
   });
 }
 

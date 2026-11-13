@@ -8,6 +8,7 @@ import {
   clearanceCardPresets,
   defaultCardTemplate,
 } from "@/lib/cardTemplateSchema";
+import CardRenderer from "./CardRenderer";
 
 const TITLE_SOURCE_OPTIONS = [
   ["custom", "Custom title"],
@@ -28,18 +29,6 @@ function fieldLabel(key) {
   return cardFields.find((field) => field.key === key)?.label || key;
 }
 
-function getFieldValue(field, student, school) {
-  if (field === "school_name") return school?.school_name || "School name";
-  if (field === "school_term") return school?.current_term ? `TERM | ${school.current_term}` : "Current term";
-  if (field === "school_phone") return school?.contact_phone ? `Tel: ${school.contact_phone}` : "School phone";
-  if (field === "full_name") return student.full_name || "Student name";
-  if (field === "student_account_no") return student.student_account_no || "Student number";
-  if (field === "class_name") return `Class: ${student.class_name || "Not set"}`;
-  if (field === "stream") return `Stream: ${student.stream || "Not set"}`;
-  if (field === "student_type") return `Type: ${student.student_type || "Not set"}`;
-  return "";
-}
-
 function constrainElement(element) {
   const width = Math.max(3, Math.min(100, Number(element.width) || 3));
   const height = Math.max(3, Math.min(100, Number(element.height) || 3));
@@ -52,12 +41,14 @@ function constrainElement(element) {
     width: Math.round(width * 100) / 100,
     height: Math.round(height * 100) / 100,
     fontSize: Math.max(6, Math.min(48, Number(element.fontSize) || 6)),
+    rotation: Math.max(-45, Math.min(45, Number(element.rotation) || 0)),
   };
 }
 
 export default function QrCards({ students, school, templates: savedTemplates, canManage, selectedTemplateId }) {
   const [codes, setCodes] = useState({});
   const [templates, setTemplates] = useState(savedTemplates);
+  const [previewMode, setPreviewMode] = useState("reference");
   const initialTemplate = savedTemplates.find((item) => item.id === selectedTemplateId)
     || newestTemplate(savedTemplates.filter((item) => item.template.cardType === "general"));
   const [templateName, setTemplateName] = useState(initialTemplate?.name || "Standard identity card");
@@ -255,120 +246,60 @@ export default function QrCards({ students, school, templates: savedTemplates, c
     link.click();
   }
 
-  function renderElementValue(student, field) {
-    if (field === "title") {
-      return template.titleField === "custom"
-        ? template.title
-        : getFieldValue(template.titleField, student, school);
-    }
-    if (field === "school_name" || field === "full_name" || field === "student_account_no"
-      || field === "school_term" || field === "school_phone" || field === "class_name"
-      || field === "stream" || field === "student_type") {
-      return getFieldValue(field, student, school);
-    }
-    if (field === "school_logo") {
-      return school?.logo_url
-        ? <img className="card-element-school-logo" src={school.logo_url} alt={`${school.school_name || "School"} logo`} />
-        : <span className="card-element-logo-placeholder">LOGO</span>;
-    }
-    if (field === "photo_url") {
-      return student.photo_url
-        ? <img className="card-element-photo" src={student.photo_url} alt={`Portrait of ${student.full_name || "student"}`} />
-        : <span className="card-element-initial">{(student.full_name || "?").slice(0, 1)}</span>;
-    }
-    if (field === "qr_code") {
-      return codes[student.student_uid]
-        ? <img className="card-element-qr" src={codes[student.student_uid]} alt={`Verification QR code for ${student.full_name || "student"}`} />
-        : <span className="qr-loading">QR code</span>;
-    }
-    if (field === "clearance_deadline") {
-      return student.clearance_deadline
-        ? `Deadline: ${student.clearance_deadline}`
-        : "Deadline: __________________";
-    }
-    if (field === "issued_on") return `Issued: ${student.issued_on || "________________"}`;
-    if (field === "signature_line") return "Sign: ................................";
-    if (field === "accounts_department") return "(Accounts Dept.)";
-    if (field === "clearance_stamp") {
-      return student.clearance_verdict === "CLEARED" || (designer && template.cardType === "permanent")
-        ? "CLEARED"
-        : "ALLOWED";
-    }
-    return null;
-  }
-
-  function renderCard(student, designer = false) {
+  function renderCard(student, designer = false, cardSchool = school) {
     return (
-      <article
-        className={`qr-card ${designer ? "qr-card-editor" : "qr-card-issued"}`}
+      <CardRenderer
         key={student.student_uid}
-        style={{
-          "--card-accent": template.accentColor,
-          "--card-background": template.backgroundColor,
-          "--card-width": `${template.widthMm}mm`,
-          "--card-height": `${template.heightMm}mm`,
-          "--card-ratio": `${template.widthMm} / ${template.heightMm}`,
-        }}
-      >
-        {template.elements.map((element) => {
-          const color = element.color === "accent"
-            ? template.accentColor
-            : element.color === "text"
-              ? "#172522"
-              : element.color === "muted"
-                ? "#63736c"
-                : element.color;
-          return (
-            <div
-              key={element.field}
-              className={`card-element card-element-${element.field}${designer && selectedField === element.field ? " card-element-selected" : ""}${designer ? " card-element-draggable" : ""}`}
-              style={{
-                left: `${element.x}%`,
-                top: `${element.y}%`,
-                width: `${element.width}%`,
-                height: `${element.height}%`,
-                fontSize: `${element.fontSize}px`,
-                textAlign: element.align,
-                color,
-              }}
-              aria-label={designer ? `${fieldLabel(element.field)}. Drag to move; use arrow keys for precise placement.` : undefined}
-              role={designer ? "group" : undefined}
-              tabIndex={designer ? 0 : undefined}
-              onClick={designer ? () => setSelectedField(element.field) : undefined}
-              onPointerDown={designer ? (event) => {
-                if (!event.target.closest(".designer-resize-handle")) startPointerAction(element.field, event, "move");
-              } : undefined}
-              onPointerMove={designer ? movePointerAction : undefined}
-              onPointerUp={designer ? finishPointerAction : undefined}
-              onPointerCancel={designer ? finishPointerAction : undefined}
-              onKeyDown={designer ? (event) => handleElementKeyDown(element.field, event) : undefined}
-            >
-              {renderElementValue(student, element.field)}
-              {designer && selectedField === element.field && (
-                <button
-                  type="button"
-                  className="designer-resize-handle"
-                  aria-label={`Resize ${fieldLabel(element.field)}`}
-                  onPointerDown={(event) => startPointerAction(element.field, event, "resize")}
-                  onClick={(event) => event.stopPropagation()}
-                />
-              )}
-            </div>
-          );
-        })}
-      </article>
+        student={student}
+        school={cardSchool}
+        template={template}
+        codes={codes}
+        designer={designer}
+        selectedField={selectedField}
+        onSelectField={setSelectedField}
+        onPointerAction={startPointerAction}
+        onPointerMove={movePointerAction}
+        onPointerEnd={finishPointerAction}
+        onElementKeyDown={handleElementKeyDown}
+      />
     );
   }
 
   const selectedElement = template.elements.find((element) => element.field === selectedField) || template.elements[0];
-  const previewStudent = students[0] || {
-    student_uid: "designer-preview",
-    full_name: "Alexandra Sample",
-    student_account_no: "STU-001",
-    class_name: "Primary 4",
-    stream: "Blue",
-    clearance_verdict: template.cardType === "permanent" ? "CLEARED" : "ALLOWED",
+  const referenceStudent = template.cardType === "permanent"
+    ? {
+      student_uid: "jipra-permanent-preview",
+      full_name: "HIRIVE ERISA",
+      student_account_no: "05-37680",
+      class_name: "S5",
+      stream: "A",
+      student_type: "BOARDING",
+      fee_balance: "0.00",
+      issued_on: "11/10/2026",
+      clearance_stamp_date: "2026-10-10",
+      clearance_verdict: "CLEARED",
+    }
+    : {
+      student_uid: "jipra-temporary-preview",
+      full_name: "NAMUBIRU SWABRA",
+      student_account_no: "05-35278 C",
+      class_name: "S1",
+      stream: "HOUSE",
+      student_type: "DAY",
+      fee_balance: "15000.00",
+      clearance_deadline: "20/11/2026",
+      issued_on: "12/11/2026",
+      clearance_verdict: "ALLOWED",
+    };
+  const sampleSchool = {
+    ...school,
+    school_name: "JINJA PROGRESSIVE SECONDARY SCHOOL",
+    current_term: "3rd TERM | 2026",
+    contact_phone: "(0)702-182687/(0)772-525763",
   };
+  const useStudentPreview = previewMode === "student" && students.length > 0;
+  const previewStudent = useStudentPreview ? students[0] : referenceStudent;
+  const previewSchool = useStudentPreview ? school : sampleSchool;
   const reportStudents = template.cardType === "general"
     ? students
     : students.filter((student) => student.clearance_report_type === template.cardType);
@@ -415,16 +346,23 @@ export default function QrCards({ students, school, templates: savedTemplates, c
           {cardFields.map(({ key, label }) => (
             <label key={key}><input type="checkbox" checked={template.fields.includes(key)} disabled={busy || key === "full_name" || key === "qr_code"} onChange={(event) => toggleField(key, event.target.checked)} />{label}</label>
           ))}
-          <p>Student name and verification QR stay on every card. Fee balance is intentionally unavailable.</p>
+          <p>Student name and verification QR stay on every card. Fees balance is included by default; uncheck it when it should not print.</p>
         </div>
         <div className="card-designer-workspace">
           <div className="card-designer-canvas-panel">
             <div className="card-designer-canvas-heading">
-              <div><strong>Live card canvas</strong><span>Drag to move · drag the corner to resize · arrow keys for fine placement</span></div>
+              <div><strong>Template preview</strong><span>Drag to move · drag the corner to resize · arrow keys for fine placement</span></div>
+              <label>Preview details
+                <select value={previewMode} onChange={(event) => setPreviewMode(event.target.value)}>
+                  <option value="reference">JIPRA reference sample</option>
+                  {students.length > 0 && <option value="student">First active student</option>}
+                </select>
+              </label>
               <span>{template.widthMm} × {template.heightMm} mm</span>
             </div>
             <div className="card-designer-stage">
-              {renderCard(previewStudent, true)}
+              {renderCard(previewStudent, true, previewSchool)}
+              {!useStudentPreview && <span className="card-designer-preview-note">Sample details from the supplied JIPRA reference; no student portrait is reused.</span>}
             </div>
           </div>
           <aside className="card-designer-properties" aria-label="Selected component settings">
@@ -453,6 +391,11 @@ export default function QrCards({ students, school, templates: savedTemplates, c
                 )}
               </>
             )}
+            {selectedElement.field === "clearance_stamp" && (
+              <label>Stamp department
+                <input value={template.stampDepartment} maxLength={80} onChange={(event) => updateTemplate({ stampDepartment: event.target.value })} disabled={busy} />
+              </label>
+            )}
             <div className="card-designer-property-grid">
               <label>Left (%)
                 <input className={inputClass} type="number" min="0" max={100 - selectedElement.width} step="0.5" value={selectedElement.x} onChange={(event) => updateElement(selectedElement.field, { x: Number(event.target.value) })} disabled={busy} />
@@ -465,6 +408,9 @@ export default function QrCards({ students, school, templates: savedTemplates, c
               </label>
               <label>Height (%)
                 <input className={inputClass} type="number" min="3" max={100 - selectedElement.y} step="0.5" value={selectedElement.height} onChange={(event) => updateElement(selectedElement.field, { height: Number(event.target.value) })} disabled={busy} />
+              </label>
+              <label>Rotation (°)
+                <input className={inputClass} type="number" min="-45" max="45" step="1" value={selectedElement.rotation} onChange={(event) => updateElement(selectedElement.field, { rotation: Number(event.target.value) })} disabled={busy} />
               </label>
               <label>Text size (px)
                 <input className={inputClass} type="number" min="6" max="48" step="1" value={selectedElement.fontSize} onChange={(event) => updateElement(selectedElement.field, { fontSize: Number(event.target.value) })} disabled={busy || selectedElement.field === "photo_url" || selectedElement.field === "qr_code"} />
@@ -486,6 +432,25 @@ export default function QrCards({ students, school, templates: savedTemplates, c
             <label>Custom text color
               <input type="color" value={/^#[0-9a-f]{6}$/i.test(selectedElement.color) ? selectedElement.color : template.accentColor} onChange={(event) => updateElement(selectedElement.field, { color: event.target.value })} disabled={busy || selectedElement.field === "photo_url" || selectedElement.field === "qr_code"} />
             </label>
+            <div className="card-text-formatting" aria-label="Text formatting">
+              <strong>Text formatting</strong>
+              {[
+                ["bold", "Bold"],
+                ["italic", "Italic"],
+                ["underline", "Underline"],
+                ["strikethrough", "Strikethrough"],
+              ].map(([key, label]) => (
+                <label key={key}>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(selectedElement[key])}
+                    onChange={(event) => updateElement(selectedElement.field, { [key]: event.target.checked })}
+                    disabled={busy || ["photo_url", "qr_code", "school_logo"].includes(selectedElement.field)}
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
           </aside>
         </div>
         <div className="card-template-actions">

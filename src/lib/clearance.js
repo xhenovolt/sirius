@@ -127,6 +127,7 @@ export async function getStudentsForClearanceCards(schoolId) {
       class_name: student.class_name,
       stream: student.stream,
       student_type: student.student_type,
+      fee_balance: student.fee_balance,
       photo_url: student.photo_url,
       school_name: student.school_name,
       contact_phone: student.contact_phone,
