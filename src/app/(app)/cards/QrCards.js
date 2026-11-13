@@ -19,6 +19,7 @@ const TITLE_SOURCE_OPTIONS = [
   ["stream", "Stream"],
   ["student_type", "Student type"],
 ];
+const NON_TEXT_FIELDS = new Set(["school_logo", "photo_url", "qr_code", "clearance_stamp"]);
 
 function newestTemplate(templates) {
   return [...templates].sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt))[0] || null;
@@ -45,7 +46,14 @@ function constrainElement(element) {
   };
 }
 
-export default function QrCards({ students, school, templates: savedTemplates, canManage, selectedTemplateId }) {
+export default function QrCards({
+  students,
+  school,
+  templates: savedTemplates,
+  canManage,
+  selectedTemplateId,
+  productionOnly = false,
+}) {
   const [codes, setCodes] = useState({});
   const [templates, setTemplates] = useState(savedTemplates);
   const [previewMode, setPreviewMode] = useState("reference");
@@ -304,10 +312,74 @@ export default function QrCards({ students, school, templates: savedTemplates, c
     ? students
     : students.filter((student) => student.clearance_report_type === template.cardType);
   const inputClass = "card-designer-property-input";
+  const selectedIsText = !NON_TEXT_FIELDS.has(selectedElement.field);
+
+  function updateTextPart(partName, changes) {
+    updateElement(selectedElement.field, {
+      [partName]: { ...selectedElement[partName], ...changes },
+    });
+  }
+
+  function updatePartStyle(partName, key, value) {
+    const part = selectedElement[partName];
+    updateTextPart(partName, {
+      style: { ...(part.style || {}), [key]: value },
+    });
+  }
+
+  function renderPartFormatting(partName, title) {
+    const part = selectedElement[partName];
+    const style = part.style || {};
+    const colorName = style.color || selectedElement.color;
+    const colorValue = colorName === "accent"
+      ? template.accentColor
+      : colorName === "text"
+        ? "#172522"
+        : colorName === "muted"
+          ? "#63736c"
+          : colorName;
+    return (
+      <div className="card-part-formatting">
+        <strong>{title}</strong>
+        <div className="card-designer-property-grid">
+          <label>Text size (px)
+            <input className={inputClass} type="number" min="6" max="48" step="1"
+              value={style.fontSize ?? selectedElement.fontSize}
+              onChange={(event) => updatePartStyle(partName, "fontSize", Number(event.target.value))}
+              disabled={busy} />
+          </label>
+          <label>Text color
+            <input type="color"
+              value={/^#[0-9a-f]{6}$/i.test(colorValue)
+                ? colorValue
+                : template.accentColor}
+              onChange={(event) => updatePartStyle(partName, "color", event.target.value)}
+              disabled={busy} />
+          </label>
+        </div>
+        <div className="card-text-formatting">
+          {[
+            ["bold", "Bold"],
+            ["italic", "Italic"],
+            ["underline", "Underline"],
+            ["strikethrough", "Strikethrough"],
+          ].map(([key, label]) => (
+            <label key={key}>
+              <input type="checkbox"
+                checked={style[key] ?? selectedElement[key]}
+                onChange={(event) => updatePartStyle(partName, key, event.target.checked)}
+                disabled={busy} />
+              {label}
+            </label>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>
-      <section className="panel card-designer-controls">
+      {!productionOnly && <section className="panel card-designer-controls">
         <div className="panel-heading">
           <div><p className="eyebrow">Card designer</p><h2>Design the whole card</h2></div>
           <p className="card-designer-hint">Drag components on the card. Select a component to set its exact position, size, and text style.</p>
@@ -396,6 +468,52 @@ export default function QrCards({ students, school, templates: savedTemplates, c
                 <input value={template.stampDepartment} maxLength={80} onChange={(event) => updateTemplate({ stampDepartment: event.target.value })} disabled={busy} />
               </label>
             )}
+            {selectedIsText && (
+              <>
+                <div className="card-component-copy">
+                  <strong>Component and text fragments</strong>
+                  <label className="card-component-toggle">
+                    <input type="checkbox" checked={selectedElement.visible}
+                      onChange={(event) => updateElement(selectedElement.field, { visible: event.target.checked })}
+                      disabled={busy || ["full_name", "qr_code"].includes(selectedElement.field)} />
+                    Show component
+                  </label>
+                  <label className="card-component-toggle">
+                    <input type="checkbox" checked={selectedElement.label.visible}
+                      onChange={(event) => updateTextPart("label", { visible: event.target.checked })}
+                      disabled={busy} />
+                    Show label
+                  </label>
+                  <label className="card-component-toggle">
+                    <input type="checkbox" checked={selectedElement.value.visible}
+                      onChange={(event) => updateTextPart("value", { visible: event.target.checked })}
+                      disabled={busy || selectedElement.field === "full_name"} />
+                    Show value
+                  </label>
+                  <label>Label text
+                    <input value={selectedElement.label.text} maxLength={80}
+                      onChange={(event) => updateTextPart("label", { text: event.target.value })}
+                      disabled={busy} />
+                  </label>
+                  <label className="card-component-toggle">
+                    <input type="checkbox" checked={selectedElement.value.custom}
+                      onChange={(event) => updateTextPart("value", { custom: event.target.checked })}
+                      disabled={busy} />
+                    Replace live value with fixed text
+                  </label>
+                  {selectedElement.value.custom && (
+                    <label>Fixed value text
+                      <input value={selectedElement.value.text} maxLength={200}
+                        onChange={(event) => updateTextPart("value", { text: event.target.value })}
+                        disabled={busy} />
+                    </label>
+                  )}
+                  <small>Leave the fixed value option off to keep using live student and school data.</small>
+                </div>
+                {renderPartFormatting("label", "Label formatting")}
+                {renderPartFormatting("value", "Value formatting")}
+              </>
+            )}
             <div className="card-designer-property-grid">
               <label>Left (%)
                 <input className={inputClass} type="number" min="0" max={100 - selectedElement.width} step="0.5" value={selectedElement.x} onChange={(event) => updateElement(selectedElement.field, { x: Number(event.target.value) })} disabled={busy} />
@@ -459,7 +577,10 @@ export default function QrCards({ students, school, templates: savedTemplates, c
             : <span>Only school admins can save templates.</span>}
           {message && <p className="settings-message" role="status">{message}</p>}
         </div>
-      </section>
+      </section>}
+      {productionOnly && students.length === 0 && (
+        <div className="empty-state"><strong>No active students are ready for cards.</strong><p>Import student records first, then return to issue cards.</p></div>
+      )}
       {students.length > 0 && (
         reportStudents.length === 0
           ? <div className="empty-state"><strong>No students match this clearance report.</strong><p>Temporary reports include students currently allowed by an allowance or threshold. Permanent reports include students marked CLEARED.</p></div>

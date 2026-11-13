@@ -83,6 +83,13 @@ must not be treated as production-ready evidence.
       title to a student field; save a new version, reopen it, and confirm the
       layout persists. Verify `/cards/designer/{templateId}` opens the selected
       school template only.
+- [ ] In the designer, independently hide/show a text component, its label,
+      and its value; customize label spelling, substitute fixed value text,
+      and format label and value separately. Resize the signature line, save,
+      and verify the issued and preview renderers use the same template.
+- [ ] `/cards` opens on regular clearance cards and has a separate temporary
+      clearance slips tab. The card designer is a separate route; the issuance
+      page must not embed designer controls.
 - [ ] Apply migration 016 before importing student type data. Start from the
       Jipra temporary or permanent clearance design, save it as a school
       template, and print the matching report. Temporary reports include

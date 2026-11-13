@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { clearanceCardPresets, defaultCardTemplate, validateCardTemplate } from "./cardTemplateSchema.js";
+import {
+  cardElementDefaults,
+  clearanceCardPresets,
+  defaultCardTemplate,
+  validateCardTemplate,
+} from "./cardTemplateSchema.js";
 
 test("card template accepts only safe, available fields and bounded layout values", () => {
   const template = validateCardTemplate(defaultCardTemplate);
@@ -31,7 +36,7 @@ test("legacy templates gain fee balance unless a current template explicitly rem
   };
   const upgraded = validateCardTemplate(legacy);
 
-  assert.equal(upgraded.schemaVersion, 2);
+  assert.equal(upgraded.schemaVersion, 3);
   assert.ok(upgraded.fields.includes("fee_balance"));
   assert.ok(upgraded.elements.some((element) => element.field === "fee_balance"));
   assert.ok(!validateCardTemplate({
@@ -39,6 +44,99 @@ test("legacy templates gain fee balance unless a current template explicitly rem
     fields: defaultCardTemplate.fields.filter((field) => field !== "fee_balance"),
     elements: defaultCardTemplate.elements.filter((element) => element.field !== "fee_balance"),
   }).fields.includes("fee_balance"));
+});
+
+test("version 2 templates keep explicit fee opt-outs while older layouts receive editable text defaults", () => {
+  const versionTwoWithoutFees = {
+    ...defaultCardTemplate,
+    schemaVersion: 2,
+    fields: defaultCardTemplate.fields.filter((field) => field !== "fee_balance"),
+    elements: defaultCardTemplate.elements
+      .filter((element) => element.field !== "fee_balance")
+      .map(({ label, value, visible, ...element }) => element),
+  };
+  const upgraded = validateCardTemplate(versionTwoWithoutFees);
+  const classElement = upgraded.elements.find(({ field }) => field === "class_name");
+
+  assert.equal(upgraded.schemaVersion, 3);
+  assert.ok(!upgraded.fields.includes("fee_balance"));
+  assert.equal(classElement.label.text, "Class: ");
+  assert.equal(classElement.label.visible, true);
+  assert.equal(classElement.value.custom, false);
+});
+
+test("component label and value text and formatting can be customized independently", () => {
+  const fields = [...defaultCardTemplate.fields, "signature_line"];
+  const elements = [
+    ...defaultCardTemplate.elements,
+    { field: "signature_line", ...cardElementDefaults.signature_line },
+  ];
+  const template = validateCardTemplate({
+    ...defaultCardTemplate,
+    fields,
+    elements: elements.map((element) => {
+      if (element.field === "stream") {
+        return {
+          ...element,
+          label: { visible: false, text: "Stream: ", style: { bold: true, color: "#112233" } },
+          value: { custom: false, text: "", style: { fontSize: 16, italic: true } },
+        };
+      }
+      if (element.field === "signature_line") {
+        return {
+          ...element,
+          value: { custom: true, text: "____________________________", style: { underline: true } },
+        };
+      }
+      return element;
+    }),
+  });
+  const stream = template.elements.find(({ field }) => field === "stream");
+  const signature = template.elements.find(({ field }) => field === "signature_line");
+
+  assert.equal(stream.label.visible, false);
+  assert.equal(stream.label.style.color, "#112233");
+  assert.equal(stream.value.style.fontSize, 16);
+  assert.equal(stream.value.style.italic, true);
+  assert.equal(signature.value.custom, true);
+  assert.equal(signature.value.text, "____________________________");
+  assert.equal(signature.value.style.underline, true);
+  assert.equal(stream.visible, true);
+  assert.equal(stream.value.visible, true);
+  assert.equal(stream.label.visible, false);
+});
+
+test("component, label, and value visibility are independently configurable", () => {
+  const template = validateCardTemplate({
+    ...defaultCardTemplate,
+    elements: defaultCardTemplate.elements.map((element) => (
+      element.field === "stream"
+        ? {
+          ...element,
+          visible: false,
+          label: { ...element.label, visible: true },
+          value: { ...element.value, visible: false },
+        }
+        : element
+    )),
+  });
+  const stream = template.elements.find(({ field }) => field === "stream");
+
+  assert.equal(stream.visible, false);
+  assert.equal(stream.label.visible, true);
+  assert.equal(stream.value.visible, false);
+});
+
+test("student name and QR remain visible identity components", () => {
+  assert.throws(
+    () => validateCardTemplate({
+      ...defaultCardTemplate,
+      elements: defaultCardTemplate.elements.map((element) => (
+        element.field === "full_name" ? { ...element, value: { ...element.value, visible: false } } : element
+      )),
+    }),
+    /Student name and verification QR must remain visible/,
+  );
 });
 
 test("card element layouts enforce bounds, unique components, and safe styling", () => {
@@ -85,6 +183,17 @@ test("card element layouts enforce bounds, unique components, and safe styling",
       )),
     }),
     /rotation must be between/,
+  );
+  assert.throws(
+    () => validateCardTemplate({
+      ...defaultCardTemplate,
+      elements: defaultCardTemplate.elements.map((element) => (
+        element.field === "stream"
+          ? { ...element, value: { custom: true, text: "<script>", style: { color: "url(javascript:)" } } }
+          : element
+      )),
+    }),
+    /Label and value text color/,
   );
 });
 

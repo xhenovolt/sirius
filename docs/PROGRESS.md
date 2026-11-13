@@ -1226,3 +1226,20 @@ Phase 2: shared renderer + zod schema + Jipra Classic preset + live preview
   `git diff --check` passes. The configured TiDB migration/column and HTTPS
   origin checks pass. An authenticated browser/print smoke test and Vercel
   database confirmation remain deployment acceptance checks.
+
+## 2026-11-13 — Independent card text controls and issuance tabs
+
+- Added schema version 3 with independently configurable component, label,
+  and value visibility. Labels can be hidden or renamed; values can remain
+  live or use fixed custom text; label and value styles (size, color, bold,
+  italic, underline, and strikethrough) can be configured separately. This
+  supports unlabeled values such as class/stream, label-only text, custom
+  signatures, and resizing existing signature components. Older template
+  versions receive compatible defaults; v2 fee-balance opt-outs remain intact.
+- Moved the designer out of `/cards` production UI. Card issuance now uses two
+  tabs, defaulting to regular clearance cards, with temporary clearance slips
+  available separately. Each tab uses the latest matching saved school
+  template, or the built-in matching clearance preset if none has been saved.
+- Validation: all 89 automated tests pass, `npm.cmd run build` passes, and
+  `git diff --check` passes. Authenticated browser verification of layout,
+  template switching, and print/PDF remains a deployment acceptance check.

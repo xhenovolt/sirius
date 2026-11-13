@@ -39,12 +39,31 @@ export const cardElementDefaults = {
   clearance_stamp: { x: 58, y: 48, width: 26, height: 16, fontSize: 18, align: "center", color: "#344c9b" },
 };
 
+const defaultLabels = {
+  school_term: "TERM | ",
+  school_phone: "Tel: ",
+  class_name: "Class: ",
+  stream: "Stream: ",
+  student_type: "Type: ",
+  fee_balance: "Fees Balance: ",
+  clearance_deadline: "Deadline: ",
+  issued_on: "Issued: ",
+  signature_line: "Sign: ",
+};
+
 for (const [field, element] of Object.entries(cardElementDefaults)) {
   element.bold = ["title", "school_name", "full_name"].includes(field);
   element.italic = false;
   element.underline = false;
   element.strikethrough = false;
   element.rotation = 0;
+  element.label = {
+    visible: Boolean(defaultLabels[field]),
+    text: defaultLabels[field] || "",
+    style: null,
+  };
+  element.visible = true;
+  element.value = { visible: true, custom: false, text: "", style: null };
 }
 
 const allowedFields = new Set(cardFields.map(({ key }) => key));
@@ -53,7 +72,7 @@ const titleSources = new Set(["custom", "school_name", "full_name", "student_acc
 const alignments = new Set(["left", "center", "right"]);
 const colors = new Set(["accent", "text", "muted"]);
 const cardTypes = new Set(["general", "temporary", "permanent"]);
-const cardTemplateSchemaVersion = 2;
+const cardTemplateSchemaVersion = 3;
 const allowedTemplateKeys = new Set([
   "schemaVersion",
   "title",
@@ -104,7 +123,7 @@ function validateElement(element) {
   if (!element || typeof element !== "object" || Array.isArray(element)
     || Object.keys(element).some((key) => ![
       "field", "x", "y", "width", "height", "fontSize", "align", "color",
-      "bold", "italic", "underline", "strikethrough", "rotation",
+      "bold", "italic", "underline", "strikethrough", "rotation", "visible", "label", "value",
     ].includes(key))
     || !allowedElementFields.has(element.field)) {
     throw new CardTemplateError("The card template contains an unsupported component.");
@@ -130,8 +149,74 @@ function validateElement(element) {
   )) {
     throw new CardTemplateError("Text formatting options must be enabled or disabled.");
   }
+  const defaultElement = cardElementDefaults[element.field];
+  if (element.visible !== undefined && typeof element.visible !== "boolean") {
+    throw new CardTemplateError("Component visibility must be enabled or disabled.");
+  }
+  if (element.label !== undefined && (!element.label || typeof element.label !== "object"
+    || Array.isArray(element.label))) {
+    throw new CardTemplateError("Component label settings are invalid.");
+  }
+  if (element.value !== undefined && (!element.value || typeof element.value !== "object"
+    || Array.isArray(element.value))) {
+    throw new CardTemplateError("Component value settings are invalid.");
+  }
+  const label = { ...defaultElement.label, ...(element.label || {}) };
+  if (!label || typeof label !== "object" || Array.isArray(label)
+    || Object.keys(label).some((key) => !["visible", "text", "style"].includes(key))
+    || typeof label.visible !== "boolean"
+    || typeof label.text !== "string" || label.text.length > 80) {
+    throw new CardTemplateError("Component label settings are invalid.");
+  }
+  const value = { ...defaultElement.value, ...(element.value || {}) };
+  if (!value || typeof value !== "object" || Array.isArray(value)
+    || Object.keys(value).some((key) => !["visible", "custom", "text", "style"].includes(key))
+    || typeof value.visible !== "boolean"
+    || typeof value.custom !== "boolean"
+    || typeof value.text !== "string" || value.text.length > 200) {
+    throw new CardTemplateError("Component value settings are invalid.");
+  }
+  const componentVisible = element.visible ?? defaultElement.visible;
+  if ((element.field === "full_name" && (!componentVisible || !value.visible))
+    || (element.field === "qr_code" && !componentVisible)) {
+    throw new CardTemplateError("Student name and verification QR must remain visible on every card.");
+  }
+
+  function validatePartStyle(style) {
+    if (style === null || style === undefined) return null;
+    if (!style || typeof style !== "object" || Array.isArray(style)
+      || Object.keys(style).some((key) => ![
+        "fontSize", "color", "bold", "italic", "underline", "strikethrough",
+      ].includes(key))) {
+      throw new CardTemplateError("Label and value styling settings are invalid.");
+    }
+    if (style.fontSize !== undefined
+      && (!Number.isFinite(style.fontSize) || style.fontSize < 6 || style.fontSize > 48)) {
+      throw new CardTemplateError("Label and value text size must be between 6 and 48 pixels.");
+    }
+    if (style.color !== undefined && (typeof style.color !== "string"
+      || !(colors.has(style.color) || /^#[0-9a-f]{6}$/i.test(style.color)))) {
+      throw new CardTemplateError("Label and value text color is invalid.");
+    }
+    if (["bold", "italic", "underline", "strikethrough"].some(
+      (key) => style[key] !== undefined && typeof style[key] !== "boolean",
+    )) {
+      throw new CardTemplateError("Label and value formatting options must be enabled or disabled.");
+    }
+    return {
+      ...(style.fontSize === undefined ? {} : { fontSize: Math.round(style.fontSize * 100) / 100 }),
+      ...(style.color === undefined ? {} : {
+        color: colors.has(style.color) ? style.color : style.color.toLowerCase(),
+      }),
+      ...Object.fromEntries(["bold", "italic", "underline", "strikethrough"]
+        .filter((key) => style[key] !== undefined)
+        .map((key) => [key, style[key]])),
+    };
+  }
+
   return {
     field: element.field,
+    visible: element.visible ?? defaultElement.visible,
     x: Math.round(x * 100) / 100,
     y: Math.round(y * 100) / 100,
     width: Math.round(width * 100) / 100,
@@ -144,6 +229,17 @@ function validateElement(element) {
     italic: element.italic ?? cardElementDefaults[element.field].italic,
     underline: element.underline ?? cardElementDefaults[element.field].underline,
     strikethrough: element.strikethrough ?? cardElementDefaults[element.field].strikethrough,
+    label: {
+      visible: label.visible,
+      text: label.text,
+      style: validatePartStyle(label.style),
+    },
+    value: {
+      visible: value.visible,
+      custom: value.custom,
+      text: value.text,
+      style: validatePartStyle(value.style),
+    },
   };
 }
 
@@ -192,14 +288,14 @@ export function validateCardTemplate(value) {
   }
 
   const fields = [...value.fields];
-  if (schemaVersion < cardTemplateSchemaVersion && !fields.includes("fee_balance")) {
+  if (schemaVersion < 2 && !fields.includes("fee_balance")) {
     fields.push("fee_balance");
   }
   const expectedFields = new Set(["title", ...fields]);
   let elementValues = value.elements;
   if (elementValues === undefined) {
     elementValues = [...expectedFields].map((field) => ({ field, ...cardElementDefaults[field] }));
-  } else if (schemaVersion < cardTemplateSchemaVersion && Array.isArray(elementValues)
+  } else if (schemaVersion < 2 && Array.isArray(elementValues)
     && !elementValues.some((element) => element?.field === "fee_balance")) {
     elementValues = [...elementValues, { field: "fee_balance", ...cardElementDefaults.fee_balance }];
   }
